@@ -121,6 +121,10 @@ Router.init = function (injectIdParam, initialHash) {
             //TODO add correct help location
             loadVueView(SettingsView);
         },
+        report: function () {
+            helpService.setHelpLocation('02_navigation', '#report-view');
+            loadVueView(ReportView);
+        },
         help: function () {
             loadVueView(HelpView);
         },

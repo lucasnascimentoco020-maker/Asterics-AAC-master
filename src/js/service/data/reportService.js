@@ -1,4 +1,5 @@
 import { interactionService } from './interactionService';
+import { localStorageService } from './localStorageService';
 
 class ReportService {
     /**
@@ -50,8 +51,12 @@ class ReportService {
         };
     }
 
+    getCurrentUserId() {
+        return localStorageService.getAutologinOrActiveUser() || 'offline';
+    }
+
     async _getRemoteReport(filters) {
-        if (typeof window === 'undefined' || !window.fetch) {
+        if (!this._isUsageApiEnabled() || typeof window === 'undefined' || !window.fetch) {
             return null;
         }
         const params = new URLSearchParams();
@@ -69,6 +74,11 @@ class ReportService {
         } catch (error) {
             return null;
         }
+    }
+
+    _isUsageApiEnabled() {
+        const queryEnabled = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('usageApi') === 'true';
+        return queryEnabled || localStorageService.get('ASTERICS_USAGE_API_ENABLED') === 'true';
     }
 
     _getItemLabel(interaction) {

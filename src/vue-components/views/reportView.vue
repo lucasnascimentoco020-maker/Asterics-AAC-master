@@ -13,6 +13,7 @@
         <label>Até <input type="date" v-model="filters.to"></label>
         <button type="button" @click="loadReport">Atualizar</button>
       </div>
+      <p class="current-user">ID do usuário atual: <strong>{{ currentUserId }}</strong></p>
       <p><strong>Total de interações:</strong> {{ report.totalInteractions }}</p>
       <p><strong>Sessões registradas:</strong> {{ report.totalSessions }}</p>
 
@@ -83,11 +84,16 @@ export default {
       loading: true,
       error: '',
       filters: {
-        userId: '',
+        userId: reportService.getCurrentUserId(),
         from: '',
         to: ''
       }
     };
+  },
+  computed: {
+    currentUserId() {
+      return reportService.getCurrentUserId();
+    }
   }
 };
 </script>
@@ -113,5 +119,8 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 0.25em;
+}
+.current-user {
+  color: #555;
 }
 </style>

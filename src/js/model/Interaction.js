@@ -28,6 +28,10 @@ class Interaction extends Model({
     static getModelName() {
         return 'Interaction';
     }
+
+    static getIdPrefix() {
+        return Interaction.ID_PREFIX;
+    }
 }
 
 Interaction.ID_PREFIX = "interaction";

@@ -1,5 +1,6 @@
 import { Interaction } from '../../model/Interaction';
 import { databaseService } from './databaseService';
+import { localStorageService } from './localStorageService';
 
 class InteractionService {
     /**
@@ -9,7 +10,7 @@ class InteractionService {
     async logInteraction(interactionData) {
         const interaction = new Interaction(interactionData);
         try {
-            await databaseService.saveObject(interaction);
+            await databaseService.saveObject(Interaction, interaction);
             this._sendToUsageApi(interaction);
             return interaction;
         } catch (err) {
@@ -19,7 +20,7 @@ class InteractionService {
     }
 
     _sendToUsageApi(interaction) {
-        if (typeof window === 'undefined' || !window.fetch) {
+        if (!this.isUsageApiEnabled() || typeof window === 'undefined' || !window.fetch) {
             return;
         }
         window.fetch('/api/usage/events', {
@@ -31,18 +32,30 @@ class InteractionService {
         });
     }
 
+    isUsageApiEnabled() {
+        if (typeof window === 'undefined') {
+            return false;
+        }
+        const queryEnabled = new URLSearchParams(window.location.search).get('usageApi') === 'true';
+        return queryEnabled || localStorageService.get('ASTERICS_USAGE_API_ENABLED') === 'true';
+    }
+
     /**
      * Busca todas as interações registradas.
      * @returns {Promise<Array>} lista de interações
      */
     async getInteractions() {
         try {
-            const result = await databaseService.getObjectsByModelName(Interaction.getModelName());
-            return result;
+            const result = await databaseService.getObject(Interaction);
+            return Array.isArray(result) ? result : result ? [result] : [];
         } catch (err) {
             console.error('Erro ao buscar interações:', err);
             throw err;
         }
+    }
+
+    getCurrentUserId() {
+        return localStorageService.getAutologinOrActiveUser() || 'offline';
     }
 }
 

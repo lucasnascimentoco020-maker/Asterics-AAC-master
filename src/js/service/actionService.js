@@ -71,12 +71,12 @@ actionService.doAction = async function (gridIdOrObject, gridElementId) {
         const sessionId = sessionStorage.getItem('astericsUsageSessionId') || 'session-' + sessionStartedAt;
         sessionStorage.setItem('astericsUsageSessionId', sessionId);
         interactionService.logInteraction({
-            userId: (window.currentUser && window.currentUser.id) || 'offline',
+            userId: localStorageService.getAutologinOrActiveUser() || 'offline',
             sessionId: sessionId,
             gridId: gridData.id,
             context: gridData.name || gridData.title || undefined,
             elementId: gridElementId,
-            label: gridElement.label,
+            label: i18nService.getTranslation(gridElement.label) || gridElementId,
             actionType: gridElement.type,
             sessionDurationSeconds: Math.round((Date.now() - sessionStartedAt) / 1000),
             metadata: { input: 'grid-element-activation' }
