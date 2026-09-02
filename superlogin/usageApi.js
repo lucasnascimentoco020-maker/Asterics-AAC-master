@@ -2,7 +2,9 @@ const express = require('express');
 const { Pool } = require('pg');
 
 function createUsageApi() {
+    // Cria um router isolado para ser montado pelo servidor principal.
     const router = express.Router();
+    // Sem DATABASE_URL, a API permanece desativada e o app usa PouchDB local.
     const pool = process.env.DATABASE_URL
         ? new Pool({
             connectionString: process.env.DATABASE_URL,
@@ -11,6 +13,7 @@ function createUsageApi() {
         : null;
 
     function authorized(req) {
+        // O token é opcional no desenvolvimento e obrigatório quando configurado.
         const configuredToken = process.env.USAGE_API_TOKEN;
         return !configuredToken || req.get('authorization') === `Bearer ${configuredToken}`;
     }
@@ -26,11 +29,13 @@ function createUsageApi() {
     }
 
     router.post('/events', requireDatabase, async (req, res) => {
+        // Recebe eventos já validados pelo modelo do frontend.
         const event = req.body || {};
         if (!event.id || !event.userId || !event.sessionId || !event.gridId || !event.elementId) {
             return res.status(400).json({ error: 'id, userId, sessionId, gridId and elementId are required' });
         }
 
+        // Uma transação mantém aluno, sessão, grade e evento consistentes.
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -81,6 +86,7 @@ function createUsageApi() {
     });
 
     router.get('/reports', requireDatabase, async (req, res) => {
+        // Monta filtros parametrizados para evitar interpolação de valores SQL.
         const values = [];
         const filters = [];
         if (req.query.userId) {
@@ -97,6 +103,7 @@ function createUsageApi() {
         }
         const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
         try {
+            // Executa em paralelo os agregados necessários para a visão pedagógica.
             const [summary, topItems, sessions, daily, history] = await Promise.all([
                 pool.query(`SELECT COUNT(*)::int AS total_interactions, COUNT(DISTINCT session_id)::int AS total_sessions FROM interaction_events ${where}`, values),
                 pool.query(`SELECT COALESCE(label, element_id) AS item, COUNT(*)::int AS count FROM interaction_events ${where} GROUP BY item ORDER BY count DESC LIMIT 20`, values),

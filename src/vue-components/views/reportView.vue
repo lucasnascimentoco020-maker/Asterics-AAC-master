@@ -7,12 +7,14 @@
     <div v-else-if="error" class="error">{{ error }}</div>
 
     <div v-else>
+      <!-- Os filtros permitem demonstrar um aluno e um período específicos. -->
       <div class="filters">
         <label>Aluno <input v-model.trim="filters.userId" placeholder="ID do aluno"></label>
         <label>De <input type="date" v-model="filters.from"></label>
         <label>Até <input type="date" v-model="filters.to"></label>
         <button type="button" @click="loadReport">Atualizar</button>
       </div>
+      <!-- Mostra qual identificador foi usado para registrar os eventos locais. -->
       <p class="current-user">ID do usuário atual: <strong>{{ currentUserId }}</strong></p>
       <p><strong>Total de interações:</strong> {{ report.totalInteractions }}</p>
       <p><strong>Sessões registradas:</strong> {{ report.totalSessions }}</p>
@@ -53,10 +55,12 @@ import { reportService } from '../../js/service/data/reportService';
 
 export default {
   mounted() {
+    // Carrega o primeiro relatório assim que a tela é aberta.
     this.loadReport();
   },
   methods: {
     async loadReport() {
+      // Mantém o estado visual consistente enquanto a consulta é executada.
       this.loading = true;
       this.error = '';
       try {
@@ -71,6 +75,7 @@ export default {
       return new Date(timestamp).toLocaleString();
     },
     itemLabel(interaction) {
+      // Exibe no histórico o texto legível, em vez do objeto multilíngue bruto.
       if (typeof interaction.label === 'string') return interaction.label;
       if (interaction.label && typeof interaction.label === 'object') {
         return Object.values(interaction.label).find(Boolean) || interaction.elementId;
@@ -83,6 +88,7 @@ export default {
       report: null,
       loading: true,
       error: '',
+      // O usuário atual já vem selecionado para facilitar a demonstração.
       filters: {
         userId: reportService.getCurrentUserId(),
         from: '',

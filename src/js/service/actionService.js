@@ -48,6 +48,7 @@ let lastActionElementId = null;
 let lastActionTime = 0;
 
 actionService.doAction = async function (gridIdOrObject, gridElementId) {
+    // Este método é o ponto único de ativação para mouse, toque, teclado e varredura.
     if (!gridIdOrObject || !gridElementId) {
         return;
     }
@@ -56,20 +57,25 @@ actionService.doAction = async function (gridIdOrObject, gridElementId) {
     }
     lastActionTime = new Date().getTime();
     lastActionElementId = gridElementId;
+    // Aceita tanto uma grade já carregada quanto apenas o ID da grade.
     let gridData = gridIdOrObject.gridElements ? gridIdOrObject : (await dataService.getGrid(gridIdOrObject, false, true));
+    // Localiza o elemento selecionado no contexto da grade atual.
     let selectedElement = gridData.gridElements.find(e => e.id === gridElementId);
     if (!selectedElement) {
         log.warn('grid element not found: ' + gridElementId);
         return;
     }
+    // Trabalha com uma cópia para não alterar acidentalmente o objeto da interface.
     let gridElement = JSON.parse(JSON.stringify(selectedElement));
 
     // Persist locally first; the API is an optional remote copy.
     try {
+        // A sessão permanece no sessionStorage até a aba/navegador ser encerrado.
         const sessionStartedAt = Number(sessionStorage.getItem('astericsUsageSessionStartedAt')) || Date.now();
         sessionStorage.setItem('astericsUsageSessionStartedAt', String(sessionStartedAt));
         const sessionId = sessionStorage.getItem('astericsUsageSessionId') || 'session-' + sessionStartedAt;
         sessionStorage.setItem('astericsUsageSessionId', sessionId);
+        // Registra a interação antes de executar as ações do elemento.
         interactionService.logInteraction({
             userId: localStorageService.getAutologinOrActiveUser() || 'offline',
             sessionId: sessionId,
@@ -79,6 +85,7 @@ actionService.doAction = async function (gridIdOrObject, gridElementId) {
             label: i18nService.getTranslation(gridElement.label) || gridElementId,
             actionType: gridElement.type,
             sessionDurationSeconds: Math.round((Date.now() - sessionStartedAt) / 1000),
+            // Este metadado identifica que o evento nasceu da ativação da grade.
             metadata: { input: 'grid-element-activation' }
         }).catch(err => log.warn('Falha ao registrar interação: ' + err));
     } catch (err) {
