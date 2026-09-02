@@ -9,6 +9,7 @@ let { CouchAuth } = require('@klues/couch-auth');
 let useSSL = false;
 let dotenvFlow = require('dotenv-flow');
 let infoTreeAPI = require('./infoTreeAPI/infoTreeAPI.js');
+let usageApi = require('./usageApi.js');
 
 const USERNAME_REGEX = /^[a-z0-9][a-z0-9_-]{2,15}$/;; // also see src/js/util/constants.js:8
 
@@ -106,6 +107,7 @@ app.use('/user/validate-username/:name', async (req, res, next) => {
 });
 
 app.use('/api/infotree', infoTreeAPI.getRouter(config.dbServer.protocol, config.dbServer.host));
+app.use('/api/usage', usageApi.createUsageApi());
 
 if (useSSL) {
     let privateKey = fs.readFileSync(process.env.PATH_TO_KEY, 'utf8');

@@ -10,11 +10,25 @@ class InteractionService {
         const interaction = new Interaction(interactionData);
         try {
             await databaseService.saveObject(interaction);
+            this._sendToUsageApi(interaction);
             return interaction;
         } catch (err) {
             console.error('Erro ao registrar interação:', err);
             throw err;
         }
+    }
+
+    _sendToUsageApi(interaction) {
+        if (typeof window === 'undefined' || !window.fetch) {
+            return;
+        }
+        window.fetch('/api/usage/events', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(interaction)
+        }).catch(() => {
+            // PouchDB remains the local/offline source of truth.
+        });
     }
 
     /**

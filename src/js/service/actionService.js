@@ -57,17 +57,30 @@ actionService.doAction = async function (gridIdOrObject, gridElementId) {
     lastActionTime = new Date().getTime();
     lastActionElementId = gridElementId;
     let gridData = gridIdOrObject.gridElements ? gridIdOrObject : (await dataService.getGrid(gridIdOrObject, false, true));
-    let gridElement = JSON.parse(JSON.stringify(gridData.gridElements.find(e => e.id === gridElementId)));
+    let selectedElement = gridData.gridElements.find(e => e.id === gridElementId);
+    if (!selectedElement) {
+        log.warn('grid element not found: ' + gridElementId);
+        return;
+    }
+    let gridElement = JSON.parse(JSON.stringify(selectedElement));
 
-    // REGISTRO DE INTERAÇÃO (contribuição do TCC)
+    // Persist locally first; the API is an optional remote copy.
     try {
+        const sessionStartedAt = Number(sessionStorage.getItem('astericsUsageSessionStartedAt')) || Date.now();
+        sessionStorage.setItem('astericsUsageSessionStartedAt', String(sessionStartedAt));
+        const sessionId = sessionStorage.getItem('astericsUsageSessionId') || 'session-' + sessionStartedAt;
+        sessionStorage.setItem('astericsUsageSessionId', sessionId);
         interactionService.logInteraction({
             userId: (window.currentUser && window.currentUser.id) || 'offline',
+            sessionId: sessionId,
             gridId: gridData.id,
+            context: gridData.name || gridData.title || undefined,
             elementId: gridElementId,
             label: gridElement.label,
-            actionType: gridElement.type
-        });
+            actionType: gridElement.type,
+            sessionDurationSeconds: Math.round((Date.now() - sessionStartedAt) / 1000),
+            metadata: { input: 'grid-element-activation' }
+        }).catch(err => log.warn('Falha ao registrar interação: ' + err));
     } catch (err) {
         log.warn('Falha ao registrar interação: ' + err);
     }

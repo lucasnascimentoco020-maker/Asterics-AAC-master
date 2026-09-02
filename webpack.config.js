@@ -56,6 +56,9 @@ module.exports = env => {
             port: 9095,
             open: false,
             hot: true,
+            proxy: {
+                '/api/usage': 'http://localhost:3000'
+            },
             client: {
                 overlay: true
             }

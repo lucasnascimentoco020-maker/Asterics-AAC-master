@@ -7,11 +7,15 @@ class Interaction extends Model({
     modelName: String,
     modelVersion: String,
     userId: String,
+    sessionId: String,
     gridId: String,
+    context: [String, undefined],
     elementId: String,
     label: [String, undefined],
     actionType: [String, undefined],
-    timestamp: [Number, String]
+    timestamp: [Number, String],
+    sessionDurationSeconds: [Number, undefined],
+    metadata: [Object, undefined]
 }) {
     constructor(properties) {
         let defaults = JSON.parse(JSON.stringify(Interaction.DEFAULTS));
@@ -32,10 +36,14 @@ Interaction.DEFAULTS = {
     modelName: Interaction.getModelName(),
     modelVersion: constants.MODEL_VERSION,
     userId: '',
+    sessionId: '',
     gridId: '',
+    context: undefined,
     elementId: '',
     label: undefined,
     actionType: undefined,
-    timestamp: undefined
+    timestamp: undefined,
+    sessionDurationSeconds: undefined,
+    metadata: undefined
 };
 export { Interaction };

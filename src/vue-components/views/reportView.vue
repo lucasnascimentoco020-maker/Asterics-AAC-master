@@ -7,7 +7,14 @@
     <div v-else-if="error" class="error">{{ error }}</div>
 
     <div v-else>
+      <div class="filters">
+        <label>Aluno <input v-model.trim="filters.userId" placeholder="ID do aluno"></label>
+        <label>De <input type="date" v-model="filters.from"></label>
+        <label>Até <input type="date" v-model="filters.to"></label>
+        <button type="button" @click="loadReport">Atualizar</button>
+      </div>
       <p><strong>Total de interações:</strong> {{ report.totalInteractions }}</p>
+      <p><strong>Sessões registradas:</strong> {{ report.totalSessions }}</p>
 
       <h2>Elementos mais usados</h2>
       <ul>
@@ -29,6 +36,13 @@
           {{ item[0] }} — {{ item[1] }} interações
         </li>
       </ul>
+
+      <h2>Histórico recente</h2>
+      <ul>
+        <li v-for="interaction in report.userHistory" :key="interaction.id">
+          {{ formatDate(interaction.timestamp) }} — {{ itemLabel(interaction) }} ({{ interaction.userId }})
+        </li>
+      </ul>
     </div>
   </div>
 </template>
@@ -37,21 +51,43 @@
 import { reportService } from '../../js/service/data/reportService';
 
 export default {
+  mounted() {
+    this.loadReport();
+  },
+  methods: {
+    async loadReport() {
+      this.loading = true;
+      this.error = '';
+      try {
+        this.report = await reportService.generateUsageReport(this.filters);
+      } catch (err) {
+        this.error = 'Erro ao gerar relatório: ' + err;
+      } finally {
+        this.loading = false;
+      }
+    },
+    formatDate(timestamp) {
+      return new Date(timestamp).toLocaleString();
+    },
+    itemLabel(interaction) {
+      if (typeof interaction.label === 'string') return interaction.label;
+      if (interaction.label && typeof interaction.label === 'object') {
+        return Object.values(interaction.label).find(Boolean) || interaction.elementId;
+      }
+      return interaction.elementId;
+    }
+  },
   data() {
     return {
       report: null,
       loading: true,
-      error: ''
+      error: '',
+      filters: {
+        userId: '',
+        from: '',
+        to: ''
+      }
     };
-  },
-  async mounted() {
-    try {
-      this.report = await reportService.generateUsageReport();
-    } catch (err) {
-      this.error = 'Erro ao gerar relatório: ' + err;
-    } finally {
-      this.loading = false;
-    }
   }
 };
 </script>
@@ -65,5 +101,17 @@ export default {
 }
 .error {
   color: #c00;
+}
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75em;
+  align-items: end;
+  margin-bottom: 1em;
+}
+.filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
 }
 </style>

@@ -21,6 +21,7 @@
     "n-ary-huffman": "^4.0.0",
     "navigo": "7.1.2",
     "pouchdb": "^8.0.1",
+    "pg": "^8.16.3",
     "predictionary": "^1.6.0",
     "sharp": "^0.34.5",
     "superlogin-client": "^0.8.0",
