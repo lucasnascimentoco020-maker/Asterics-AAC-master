@@ -76,8 +76,8 @@ actionService.doAction = async function (gridIdOrObject, gridElementId) {
         const sessionId = sessionStorage.getItem('astericsUsageSessionId') || 'session-' + sessionStartedAt;
         sessionStorage.setItem('astericsUsageSessionId', sessionId);
         // Registra a interação antes de executar as ações do elemento.
-        interactionService.logInteraction({
-            userId: localStorageService.getAutologinOrActiveUser() || 'offline',
+        await interactionService.logInteraction({
+            userId: interactionService.getCurrentUserId(),
             sessionId: sessionId,
             gridId: gridData.id,
             context: gridData.name || gridData.title || undefined,

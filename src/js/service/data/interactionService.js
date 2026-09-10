@@ -13,6 +13,14 @@ class InteractionService {
         try {
             // O PouchDB é a fonte local de verdade e permite uso offline.
             await databaseService.saveObject(Interaction, interaction);
+            const savedInteraction = await databaseService.getSingleObject(Interaction, interaction.id);
+            const databaseName = databaseService.getCurrentUsedDatabase();
+            console.info('[usage] interação salva', {
+                id: interaction.id,
+                userId: interaction.userId,
+                database: databaseName,
+                verified: !!savedInteraction
+            });
             // A cópia remota é opcional e não bloqueia o funcionamento local.
             this._sendToUsageApi(interaction);
             return interaction;
@@ -55,7 +63,12 @@ class InteractionService {
         try {
             // getObject retorna todos os documentos cujo ID começa com interaction.
             const result = await databaseService.getObject(Interaction);
-            return Array.isArray(result) ? result : result ? [result] : [];
+            const interactions = Array.isArray(result) ? result : result ? [result] : [];
+            console.info('[usage] interações recuperadas', {
+                count: interactions.length,
+                database: databaseService.getCurrentUsedDatabase()
+            });
+            return interactions;
         } catch (err) {
             console.error('Erro ao buscar interações:', err);
             throw err;
@@ -63,7 +76,7 @@ class InteractionService {
     }
 
     getCurrentUserId() {
-        return localStorageService.getAutologinOrActiveUser() || 'offline';
+        return databaseService.getCurrentUsedDatabase() || localStorageService.getAutologinOrActiveUser() || 'offline';
     }
 }
 

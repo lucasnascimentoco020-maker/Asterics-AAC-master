@@ -14,6 +14,11 @@ class ReportService {
         }
         // Caso contrário, consulta os eventos armazenados localmente no PouchDB.
         let interactions = await interactionService.getInteractions();
+        log.info('[usage] relatório antes dos filtros', {
+            count: interactions.length,
+            userIds: [...new Set(interactions.map(interaction => interaction.userId).filter(Boolean))],
+            database: interactionService.getCurrentUserId()
+        });
         // Aplica os filtros pedagógicos antes de calcular os indicadores.
         interactions = interactions.filter(interaction => {
             const timestamp = new Date(interaction.timestamp).getTime();
@@ -21,6 +26,11 @@ class ReportService {
             const matchesFrom = !filters.from || timestamp >= new Date(filters.from).getTime();
             const matchesTo = !filters.to || timestamp < new Date(filters.to).getTime() + 86400000;
             return matchesUser && matchesFrom && matchesTo;
+        });
+        log.info('[usage] filtros do relatório aplicados', {
+            filters,
+            count: interactions.length,
+            userIds: [...new Set(interactions.map(interaction => interaction.userId).filter(Boolean))]
         });
         // Total de ativações no período e usuário selecionados.
         const total = interactions.length;
@@ -77,7 +87,15 @@ class ReportService {
             const report = await response.json();
             return Object.assign(report, {
                 mostUsedElements: (report.mostUsedItems || []).map(item => [item.item, item.count]),
-                interactionsByDay: (report.interactionsByDay || []).map(item => [String(item.day), item.count])
+                interactionsByDay: (report.interactionsByDay || []).map(item => [String(item.day), item.count]),
+                userHistory: (report.userHistory || []).map(interaction => ({
+                    id: interaction.id,
+                    userId: interaction.student_id,
+                    timestamp: interaction.occurred_at,
+                    label: interaction.item,
+                    elementId: interaction.item,
+                    actionType: interaction.interaction_type
+                }))
             });
         } catch (error) {
             return null;

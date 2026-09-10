@@ -66,7 +66,8 @@ export default {
       try {
         this.report = await reportService.generateUsageReport(this.filters);
       } catch (err) {
-        this.error = 'Erro ao gerar relatório: ' + err;
+        this.report = this.emptyReport();
+        this.error = 'Erro ao gerar relatório: ' + (err && err.message ? err.message : err);
       } finally {
         this.loading = false;
       }
@@ -81,6 +82,16 @@ export default {
         return Object.values(interaction.label).find(Boolean) || interaction.elementId;
       }
       return interaction.elementId;
+    },
+    emptyReport() {
+      return {
+        totalInteractions: 0,
+        totalSessions: 0,
+        mostUsedElements: [],
+        interactionsByActionType: [],
+        interactionsByDay: [],
+        userHistory: []
+      };
     }
   },
   data() {
@@ -90,7 +101,9 @@ export default {
       error: '',
       // O usuário atual já vem selecionado para facilitar a demonstração.
       filters: {
-        userId: reportService.getCurrentUserId(),
+        // Começa sem filtro para mostrar todos os eventos locais, inclusive os
+        // registrados antes da correção do identificador do usuário.
+        userId: '',
         from: '',
         to: ''
       }

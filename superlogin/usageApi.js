@@ -109,7 +109,7 @@ function createUsageApi() {
                 pool.query(`SELECT COALESCE(label, element_id) AS item, COUNT(*)::int AS count FROM interaction_events ${where} GROUP BY item ORDER BY count DESC LIMIT 20`, values),
                 pool.query(`SELECT session_id, student_id, MIN(occurred_at) AS started_at, MAX(occurred_at) AS last_seen_at, COUNT(*)::int AS interaction_count FROM interaction_events ${where} GROUP BY session_id, student_id ORDER BY started_at DESC`, values),
                 pool.query(`SELECT DATE(occurred_at) AS day, COUNT(*)::int AS count FROM interaction_events ${where} GROUP BY day ORDER BY day`, values),
-                pool.query(`SELECT student_id, occurred_at, COALESCE(label, element_id) AS item, interaction_type FROM interaction_events ${where} ORDER BY occurred_at DESC LIMIT 500`, values)
+                pool.query(`SELECT id, student_id, occurred_at, COALESCE(label, element_id) AS item, interaction_type FROM interaction_events ${where} ORDER BY occurred_at DESC LIMIT 500`, values)
             ]);
             res.json({
                 generatedAt: new Date().toISOString(),
