@@ -30,6 +30,9 @@ class ReportService {
         // Aplica os filtros pedagógicos antes de calcular os indicadores.
         interactions = interactions.filter(interaction => {
             const timestamp = new Date(interaction.timestamp).getTime();
+            if (!Number.isFinite(timestamp)) {
+                return false;
+            }
             const matchesUser = !filters.userId || interaction.userId === filters.userId;
             const matchesFrom = !filters.from || timestamp >= new Date(filters.from).getTime();
             const matchesTo = !filters.to || timestamp < new Date(filters.to).getTime() + 86400000;
@@ -58,7 +61,7 @@ class ReportService {
             const actionKey = inter.actionType || 'unknown';
             byActionType[actionKey] = (byActionType[actionKey] || 0) + 1;
 
-            const day = new Date(inter.timestamp).toLocaleDateString();
+            const day = new Date(inter.timestamp).toLocaleDateString('pt-BR');
             byDay[day] = (byDay[day] || 0) + 1;
         });
 
@@ -71,7 +74,10 @@ class ReportService {
             mostUsedItems: this._sortDesc(byElement),
             interactionsByActionType: this._sortDesc(byActionType),
             interactionsByDay: this._sortAsc(byDay),
-            userHistory: interactions.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 500)
+            userHistory: interactions
+                .slice()
+                .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+                .slice(0, 500)
         };
     }
 
