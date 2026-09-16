@@ -7,11 +7,19 @@ class ReportService {
      * @returns {Promise<Object>} relatório com indicadores de uso
      */
     async generateUsageReport(filters = {}) {
+        const localReport = await this._generateLocalReport(filters);
         // Se habilitada, a API PostgreSQL fornece o relatório centralizado.
         const remoteReport = await this._getRemoteReport(filters);
         if (remoteReport) {
-            return remoteReport;
+            // Uma resposta remota vazia não deve esconder eventos já salvos localmente.
+            if (remoteReport.totalInteractions > 0 || localReport.totalInteractions === 0) {
+                return remoteReport;
+            }
         }
+        return localReport;
+    }
+
+    async _generateLocalReport(filters) {
         // Caso contrário, consulta os eventos armazenados localmente no PouchDB.
         let interactions = await interactionService.getInteractions();
         log.info('[usage] relatório antes dos filtros', {
