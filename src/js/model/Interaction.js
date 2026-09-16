@@ -36,11 +36,11 @@ class Interaction extends Model({
         let defaults = JSON.parse(JSON.stringify(Interaction.DEFAULTS));
         // Preenche propriedades ausentes respeitando as regras do modelo.
         properties = modelUtil.setDefaults(properties, undefined, Interaction) || {};
+        // O timestamp precisa existir antes da validação feita pelo Model.
+        properties.timestamp = properties.timestamp || Date.now();
         super(Object.assign(defaults, properties));
         // Gera o ID somente quando o chamador não forneceu um identificador.
         this.id = this.id || modelUtil.generateId(Interaction.ID_PREFIX);
-        // Registra o instante da criação se o evento ainda não tiver timestamp.
-        this.timestamp = this.timestamp || Date.now();
     }
 
     static getModelName() {

@@ -76,18 +76,22 @@ actionService.doAction = async function (gridIdOrObject, gridElementId) {
         const sessionId = sessionStorage.getItem('astericsUsageSessionId') || 'session-' + sessionStartedAt;
         sessionStorage.setItem('astericsUsageSessionId', sessionId);
         // Registra a interação antes de executar as ações do elemento.
-        await interactionService.logInteraction({
-            userId: interactionService.getCurrentUserId(),
-            sessionId: sessionId,
-            gridId: gridData.id,
-            context: gridData.name || gridData.title || undefined,
-            elementId: gridElementId,
-            label: i18nService.getTranslation(gridElement.label) || gridElementId,
-            actionType: gridElement.type,
+        const interactionData = {
+            userId: String(interactionService.getCurrentUserId() || 'offline'),
+            sessionId: String(sessionId),
+            gridId: String(gridData.id || ''),
+            context: typeof gridData.label === 'string' ? gridData.label : undefined,
+            elementId: String(gridElementId),
+            label: String(i18nService.getTranslation(gridElement.label) || gridElementId),
+            actionType: typeof gridElement.type === 'string' ? gridElement.type : 'unknown',
             sessionDurationSeconds: Math.round((Date.now() - sessionStartedAt) / 1000),
             // Este metadado identifica que o evento nasceu da ativação da grade.
             metadata: { input: 'grid-element-activation' }
-        }).catch(err => log.warn('Falha ao registrar interação: ' + err));
+        };
+        await interactionService.logInteraction(interactionData).catch(err => {
+            console.error('[usage] falha ao registrar interação', err, interactionData);
+            log.warn('Falha ao registrar interação: ' + (err && err.message ? err.message : err));
+        });
     } catch (err) {
         log.warn('Falha ao registrar interação: ' + err);
     }
