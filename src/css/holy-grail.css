@@ -33,6 +33,10 @@
  */
 .holy-grail-content {
     flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 
 /**
@@ -89,7 +93,8 @@ nav li:focus {
         flex: 0 0 12vh;
     }
 
-    .hg-sidebar button, #syncVisualization {
+    .hg-sidebar button,
+    #syncVisualization {
         font-size: 3vh;
         line-height: 0;
     }
@@ -98,7 +103,9 @@ nav li:focus {
         height: 10vh;
     }
 
-    header button, header a, header input {
+    header button,
+    header a,
+    header input {
         height: 10vh !important;
         max-height: 40px;
         font-size: 4vh;
