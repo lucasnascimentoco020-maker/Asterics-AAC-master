@@ -54,6 +54,7 @@
   "scripts": {
     "start": "webpack-dev-server",
     "start-auth": "node superlogin/start.js",
+    "start-usage-api": "node superlogin/usageStart.js",
     "start-auth-ssl": "node superlogin/start.js ssl",
     "build": "jest && webpack --config webpack.config.js --env production && node scripts/getServiceWorkerCachePaths.js",
     "release": "cp scripts/release.sh scripts/release.tmp.sh && sh scripts/release.tmp.sh && rm scripts/release.tmp.sh",

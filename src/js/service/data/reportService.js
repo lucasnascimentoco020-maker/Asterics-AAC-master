@@ -2,23 +2,111 @@ import { interactionService } from './interactionService';
 import { localStorageService } from './localStorageService';
 
 class ReportService {
+    _getAiCacheKey(filters = {}) {
+        const scope = filters.userId || interactionService.getCurrentUserId() || 'all';
+        return `ASTERICS_PEDAGOGICAL_AI_WEEKLY_CACHE_${encodeURIComponent(scope)}`;
+    }
+
+    _getCachedAiAnalysis(filters = {}) {
+        try {
+            const cacheEntry = localStorageService.getJSON(this._getAiCacheKey(filters));
+            if (cacheEntry && this._isValidAiFeedback(cacheEntry.lastAnalysis && cacheEntry.lastAnalysis.feedback)) {
+                return cacheEntry.lastAnalysis;
+            }
+            if (cacheEntry && this._isValidAiFeedback(cacheEntry.feedback)) {
+                return { feedback: cacheEntry.feedback, generatedAt: cacheEntry.generatedAt };
+            }
+        } catch (error) {
+            return null;
+        }
+        return null;
+    }
+
     /**
      * Gera um relatório de uso a partir das interações registradas.
      * @returns {Promise<Object>} relatório com indicadores de uso
      */
     async generateUsageReport(filters = {}) {
+        if (!filters.userId) {
+            return {
+                generatedAt: null,
+                totalInteractions: 0,
+                totalSessions: 0,
+                mostUsedElements: [],
+                mostUsedItems: [],
+                mostUsedCombinations: [],
+                interactionsByActionType: [],
+                interactionsByDay: [],
+                userHistory: [],
+                lastAiAnalysis: null
+            };
+        }
         const localReport = await this._generateLocalReport(filters);
         // Se habilitada, a API PostgreSQL fornece o relatório centralizado.
         const remoteReport = await this._getRemoteReport(filters);
+        let report = localReport;
         if (remoteReport) {
             // Uma resposta remota vazia não deve esconder eventos já salvos localmente.
             if (remoteReport.totalInteractions > 0 || localReport.totalInteractions === 0) {
-                return Object.assign(remoteReport, {
-                    pedagogicalFeedback: this._buildPedagogicalFeedback(remoteReport)
+                report = Object.assign(remoteReport, {
+                    pedagogicalFeedback: this._buildPedagogicalFeedback(remoteReport),
+                    pedagogicalFeedbackSource: 'indicators'
                 });
             }
         }
-        return localReport;
+        report.lastAiAnalysis = this._getCachedAiAnalysis(filters);
+        return report;
+    }
+
+    async generateAiAnalysis(report, filters = {}) {
+        if (!filters.userId) {
+            throw new Error('Selecione um aluno antes de solicitar a análise.');
+        }
+        if (typeof window === 'undefined' || !window.fetch) {
+            throw new Error('A API de análise não está disponível neste navegador.');
+        }
+
+        const statusResponse = await window.fetch('/api/usage/pedagogical-analysis/status');
+        if (!statusResponse.ok) {
+            throw new Error('Não foi possível verificar a configuração da IA.');
+        }
+        const status = await statusResponse.json();
+        if (!status.enabled) {
+            throw new Error('A IA não está configurada no servidor.');
+        }
+
+        const response = await window.fetch('/api/usage/pedagogical-analysis', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(this._buildAiAnalysisData(report))
+        });
+        if (!response.ok) {
+            const result = await response.json().catch(() => ({}));
+            throw new Error(result.details || 'A IA não conseguiu gerar a análise. Verifique a chave, a cota e a conexão do servidor.');
+        }
+
+        const result = await response.json();
+        if (!this._isValidAiFeedback(result.feedback)) {
+            throw new Error('A resposta da IA veio em um formato inválido.');
+        }
+
+        const analysis = { feedback: result.feedback, generatedAt: new Date().toISOString() };
+        const cacheKey = this._getAiCacheKey(filters);
+        let cacheEntry = {};
+        try {
+            cacheEntry = localStorageService.getJSON(cacheKey) || {};
+        } catch (error) {
+            cacheEntry = {};
+        }
+        cacheEntry.lastAnalysis = analysis;
+        cacheEntry.feedback = analysis.feedback;
+        cacheEntry.generatedAt = analysis.generatedAt;
+        try {
+            localStorageService.saveJSON(cacheKey, cacheEntry);
+        } catch (error) {
+            // A resposta continua disponível nesta sessão se o armazenamento falhar.
+        }
+        return analysis;
     }
 
     async _generateLocalReport(filters) {
@@ -66,6 +154,7 @@ class ReportService {
             const day = new Date(inter.timestamp).toLocaleDateString('pt-BR');
             byDay[day] = (byDay[day] || 0) + 1;
         });
+        const mostUsedCombinations = this._getMostUsedCombinations(interactions);
 
         return {
             generatedAt: new Date().toISOString(),
@@ -74,6 +163,7 @@ class ReportService {
             totalSessions: new Set(interactions.map(inter => inter.sessionId).filter(Boolean)).size,
             mostUsedElements: this._sortDesc(byElement),
             mostUsedItems: this._sortDesc(byElement),
+            mostUsedCombinations,
             interactionsByActionType: this._sortDesc(byActionType),
             interactionsByDay: this._sortAsc(byDay),
             userHistory: interactions
@@ -84,10 +174,53 @@ class ReportService {
                 totalInteractions: total,
                 totalSessions: new Set(interactions.map(inter => inter.sessionId).filter(Boolean)).size,
                 mostUsedElements: this._sortDesc(byElement),
+                mostUsedCombinations,
                 interactionsByActionType: this._sortDesc(byActionType),
                 interactionsByDay: this._sortAsc(byDay)
-            }, interactions)
+            }, interactions),
+            pedagogicalFeedbackSource: 'indicators'
         };
+    }
+
+    _getMostUsedCombinations(interactions) {
+        const previousBySession = {};
+        const combinations = {};
+        interactions
+            .filter(interaction => interaction.sessionId && Number.isFinite(new Date(interaction.timestamp).getTime()))
+            .slice()
+            .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+            .forEach(interaction => {
+                const sessionKey = `${interaction.userId || ''}:${interaction.sessionId}`;
+                const previous = previousBySession[sessionKey];
+                if (previous) {
+                    const items = [previous, this._getItemLabel(interaction)];
+                    const key = JSON.stringify(items);
+                    combinations[key] = combinations[key] || { items, count: 0 };
+                    combinations[key].count += 1;
+                }
+                previousBySession[sessionKey] = this._getItemLabel(interaction);
+            });
+        return Object.values(combinations).sort((a, b) => b.count - a.count).slice(0, 20);
+    }
+
+    _buildAiAnalysisData(report) {
+        // Envia apenas estatísticas agregadas, sem IDs de aluno ou histórico individual.
+        return {
+            totalInteractions: report.totalInteractions || 0,
+            totalSessions: report.totalSessions || 0,
+            mostUsedElements: report.mostUsedElements || [],
+            mostUsedCombinations: report.mostUsedCombinations || [],
+            interactionsByActionType: report.interactionsByActionType || [],
+            interactionsByDay: report.interactionsByDay || [],
+            imageDataNote: 'O registro atual contém rótulos e IDs dos elementos, mas não armazena os arquivos de imagem; não inferir conteúdo visual.'
+        };
+    }
+
+    _isValidAiFeedback(feedback) {
+        return Boolean(feedback && typeof feedback.summary === 'string' &&
+            Array.isArray(feedback.observations) &&
+            Array.isArray(feedback.interpretations) &&
+            Array.isArray(feedback.recommendations));
     }
 
     _buildPedagogicalFeedback(report, interactions = []) {
@@ -208,6 +341,10 @@ class ReportService {
             const report = await response.json();
             return Object.assign(report, {
                 mostUsedElements: (report.mostUsedItems || []).map(item => [item.item, item.count]),
+                mostUsedCombinations: (report.mostUsedCombinations || []).map(item => ({
+                    items: [item.first_item, item.second_item],
+                    count: item.count
+                })),
                 interactionsByDay: (report.interactionsByDay || []).map(item => [String(item.day), item.count]),
                 userHistory: (report.userHistory || []).map(interaction => ({
                     id: interaction.id,
