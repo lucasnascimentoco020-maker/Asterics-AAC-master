@@ -53,14 +53,14 @@ test('generates an AI analysis only when explicitly requested', async () => {
     localStorageService.get.mockReturnValue('true');
     localStorageService.getJSON.mockImplementation(key => cache[key] || null);
     localStorageService.saveJSON.mockImplementation((key, value) => { cache[key] = value; });
+    cache.ASTERICS_PEDAGOGICAL_AI_SETTINGS = { provider: 'openai', apiKey: 'test-openai-key' };
     window.fetch = jest.fn()
-        .mockResolvedValueOnce({ ok: true, json: async () => ({ enabled: true }) })
         .mockResolvedValueOnce({
             ok: true,
             json: async () => ({
-                feedback: {
+                choices: [{ message: { content: JSON.stringify({
                     summary: 'Resumo semanal', observations: [], interpretations: [], recommendations: []
-                }
+                }) } }]
             })
         });
     const report = { totalInteractions: 10, mostUsedElements: [], mostUsedCombinations: [], interactionsByActionType: [], interactionsByDay: [] };
@@ -69,26 +69,30 @@ test('generates an AI analysis only when explicitly requested', async () => {
 
     expect(result.feedback.summary).toBe('Resumo semanal');
     expect(cache[reportService._getAiCacheKey({ userId: 'student-a' })].lastAnalysis).toEqual(result);
-    expect(window.fetch).toHaveBeenCalledTimes(2);
+    expect(window.fetch).toHaveBeenCalledTimes(1);
+    expect(window.fetch.mock.calls[0][0]).toBe('https://api.openai.com/v1/chat/completions');
+    expect(window.fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer test-openai-key');
 });
 
 test('manual AI analysis does not require remote usage reports to be enabled', async () => {
+    localStorageService.getJSON.mockImplementation(key => key === 'ASTERICS_PEDAGOGICAL_AI_SETTINGS'
+        ? { provider: 'openai', apiKey: 'test-openai-key' }
+        : null);
     localStorageService.get.mockReturnValue(null);
     window.fetch = jest.fn()
-        .mockResolvedValueOnce({ ok: true, json: async () => ({ enabled: true }) })
         .mockResolvedValueOnce({
             ok: true,
             json: async () => ({
-                feedback: {
+                choices: [{ message: { content: JSON.stringify({
                     summary: 'Análise manual', observations: [], interpretations: [], recommendations: []
-                }
+                }) } }]
             })
         });
 
     const result = await reportService.generateAiAnalysis({ totalInteractions: 2 }, { userId: 'student-a' });
 
     expect(result.feedback.summary).toBe('Análise manual');
-    expect(window.fetch).toHaveBeenCalledTimes(2);
+    expect(window.fetch).toHaveBeenCalledTimes(1);
 });
 
 test('does not call AI automatically while loading a selected user report', async () => {
@@ -114,18 +118,84 @@ test('preserves the last successful analysis when an explicit request fails', as
     localStorageService.saveJSON.mockImplementation((key, value) => { cache[key] = value; });
     const cacheKey = reportService._getAiCacheKey({ userId: 'student-c' });
     cache[cacheKey] = { lastAnalysis: previousAnalysis };
+    cache.ASTERICS_PEDAGOGICAL_AI_SETTINGS = { provider: 'openai', apiKey: 'test-openai-key' };
     window.fetch = jest.fn()
-        .mockResolvedValueOnce({ ok: true, json: async () => ({ enabled: true }) })
-        .mockResolvedValueOnce({ ok: false, json: async () => ({ details: 'Falha simulada do provedor.' }) });
+        .mockResolvedValueOnce({ ok: false, json: async () => ({ error: { message: 'Falha simulada do provedor.' } }) });
 
     await expect(reportService.generateAiAnalysis({ totalInteractions: 10 }, { userId: 'student-c' }))
         .rejects.toThrow('Falha simulada do provedor.');
     expect(reportService._getCachedAiAnalysis({ userId: 'student-c' })).toEqual(previousAnalysis);
-    expect(window.fetch).toHaveBeenCalledTimes(2);
+    expect(window.fetch).toHaveBeenCalledTimes(1);
+});
+
+test('sends Gemini requests with the saved API key and extracts structured feedback', async () => {
+    localStorageService.getJSON.mockImplementation(key => key === 'ASTERICS_PEDAGOGICAL_AI_SETTINGS'
+        ? { provider: 'gemini', apiKey: 'test-gemini-key' }
+        : null);
+    window.fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+            output: [{
+                type: 'model_output',
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        summary: 'Síntese Gemini', observations: [], interpretations: [], recommendations: []
+                    })
+                }]
+            }]
+        })
+    });
+
+    const result = await reportService.generateAiAnalysis({ totalInteractions: 1 }, { userId: 'student-a' });
+    const [url, request] = window.fetch.mock.calls[0];
+
+    expect(result.feedback.summary).toBe('Síntese Gemini');
+    expect(url).toBe('https://generativelanguage.googleapis.com/v1beta/interactions');
+    expect(request.headers['x-goog-api-key']).toBe('test-gemini-key');
+    const body = JSON.parse(request.body);
+    expect(body.model).toBe('gemini-3.8-flash');
+    expect(body.store).toBe(false);
+    expect(body.response_format.mime_type).toBe('application/json');
+});
+
+test('parses Gemini feedback wrapped in markdown fences', () => {
+    const feedback = {
+        summary: 'Síntese com formato adicional',
+        observations: ['Observação'],
+        interpretations: [],
+        recommendations: []
+    };
+
+    expect(reportService._parseAiFeedback(`Resultado:\n\`\`\`json\n${JSON.stringify(feedback)}\n\`\`\``))
+        .toEqual(feedback);
+});
+
+test('parses Gemini interaction output_text responses', () => {
+    const feedback = {
+        summary: 'Texto da interação',
+        observations: [],
+        interpretations: [],
+        recommendations: []
+    };
+
+    expect(reportService._extractGeminiOutputText({ output_text: JSON.stringify(feedback) }))
+        .toBe(JSON.stringify(feedback));
 });
 
 test('returns no previous analysis when the cache is empty', () => {
     localStorageService.getJSON.mockReturnValue(null);
 
     expect(reportService._getCachedAiAnalysis({ userId: 'student-d' })).toBeNull();
+});
+
+test('saves the selected AI provider and normalized API key', () => {
+    const storedSettings = {};
+    localStorageService.saveJSON.mockImplementation((key, value) => { storedSettings[key] = value; });
+    localStorageService.getJSON.mockImplementation(key => storedSettings[key] || null);
+
+    expect(reportService.saveAiSettings({ provider: 'gemini', apiKey: '  test-key  ' }))
+        .toEqual({ provider: 'gemini', apiKey: 'test-key' });
+    expect(storedSettings.ASTERICS_PEDAGOGICAL_AI_SETTINGS)
+        .toEqual({ provider: 'gemini', apiKey: 'test-key' });
 });

@@ -2,6 +2,30 @@ import { interactionService } from './interactionService';
 import { localStorageService } from './localStorageService';
 
 class ReportService {
+    getAiSettings() {
+        try {
+            const settings = localStorageService.getJSON('ASTERICS_PEDAGOGICAL_AI_SETTINGS') || {};
+            return {
+                provider: settings.provider === 'gemini' ? 'gemini' : 'openai',
+                apiKey: typeof settings.apiKey === 'string' ? settings.apiKey : ''
+            };
+        } catch (error) {
+            return { provider: 'openai', apiKey: '' };
+        }
+    }
+
+    saveAiSettings(settings) {
+        const provider = settings.provider === 'gemini' ? 'gemini' : 'openai';
+        const apiKey = typeof settings.apiKey === 'string' ? settings.apiKey.trim() : '';
+        const savedSettings = { provider, apiKey };
+        localStorageService.saveJSON('ASTERICS_PEDAGOGICAL_AI_SETTINGS', savedSettings);
+        const storedSettings = localStorageService.getJSON('ASTERICS_PEDAGOGICAL_AI_SETTINGS');
+        if (!storedSettings || storedSettings.provider !== provider || storedSettings.apiKey !== apiKey) {
+            throw new Error('O navegador não confirmou o salvamento. Verifique as permissões de armazenamento.');
+        }
+        return { provider, apiKey };
+    }
+
     _getAiCacheKey(filters = {}) {
         const scope = filters.userId || interactionService.getCurrentUserId() || 'all';
         return `ASTERICS_PEDAGOGICAL_AI_WEEKLY_CACHE_${encodeURIComponent(scope)}`;
@@ -63,34 +87,76 @@ class ReportService {
             throw new Error('Selecione um aluno antes de solicitar a análise.');
         }
         if (typeof window === 'undefined' || !window.fetch) {
-            throw new Error('A API de análise não está disponível neste navegador.');
+            throw new Error('A análise por IA não está disponível neste navegador.');
         }
 
-        const statusResponse = await window.fetch('/api/usage/pedagogical-analysis/status');
-        if (!statusResponse.ok) {
-            throw new Error('Não foi possível verificar a configuração da IA.');
-        }
-        const status = await statusResponse.json();
-        if (!status.enabled) {
-            throw new Error('A IA não está configurada no servidor.');
+        const { provider, apiKey } = this.getAiSettings();
+        if (!apiKey) {
+            throw new Error('Informe e salve uma chave de API na configuração da IA.');
         }
 
-        const response = await window.fetch('/api/usage/pedagogical-analysis', {
+        const analysisData = this._buildAiAnalysisData(report);
+        const prompt = 'Você é um assistente de apoio pedagógico para comunicação aumentativa e alternativa. Analise somente as estatísticas agregadas fornecidas. Os dados contêm rótulos e identificadores, não os arquivos visuais das imagens; não afirme ter visto imagens. Separe fatos observados de hipóteses, não infira diagnóstico, intenção, capacidade ou estado emocional, e proponha ações práticas que a professora possa adaptar. Gere a resposta em JSON com as propriedades summary (string), observations (array de strings), interpretations (array de strings) e recommendations (array de strings).';
+        const isGemini = provider === 'gemini';
+        const url = isGemini
+            ? 'https://generativelanguage.googleapis.com/v1beta/interactions'
+            : 'https://api.openai.com/v1/chat/completions';
+        const response = await window.fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(this._buildAiAnalysisData(report))
+            headers: isGemini
+                ? { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' }
+                : { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(isGemini
+                ? {
+                    model: 'gemini-3.8-flash',
+                    input: JSON.stringify(analysisData),
+                    system_instruction: prompt,
+                    store: false,
+                    generation_config: { thinking_level: 'low' },
+                    response_format: {
+                        type: 'text',
+                        mime_type: 'application/json',
+                        schema: {
+                            type: 'object',
+                            properties: {
+                                summary: { type: 'string' },
+                                observations: { type: 'array', items: { type: 'string' } },
+                                interpretations: { type: 'array', items: { type: 'string' } },
+                                recommendations: { type: 'array', items: { type: 'string' } }
+                            },
+                            required: ['summary', 'observations', 'interpretations', 'recommendations']
+                        }
+                    }
+                }
+                : {
+                    model: 'gpt-4o-mini',
+                    temperature: 0.2,
+                    response_format: { type: 'json_object' },
+                    messages: [
+                        { role: 'system', content: prompt },
+                        { role: 'user', content: JSON.stringify(analysisData) }
+                    ]
+                })
         });
         if (!response.ok) {
             const result = await response.json().catch(() => ({}));
-            throw new Error(result.details || 'A IA não conseguiu gerar a análise. Verifique a chave, a cota e a conexão do servidor.');
+            const details = result.error && result.error.message;
+            throw new Error(details || 'A IA não conseguiu gerar a análise. Verifique a chave, a cota e a conexão.');
         }
 
         const result = await response.json();
-        if (!this._isValidAiFeedback(result.feedback)) {
-            throw new Error('A resposta da IA veio em um formato inválido.');
+        const responseText = isGemini
+            ? this._extractGeminiOutputText(result)
+            : result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content;
+        const feedback = this._parseAiFeedback(responseText);
+        if (!this._isValidAiFeedback(feedback)) {
+            const responseShape = isGemini
+                ? `campos recebidos: ${Object.keys(result || {}).join(', ') || 'nenhum'}`
+                : 'a resposta do ChatGPT não contém o JSON esperado';
+            throw new Error(`A IA respondeu, mas o relatório não veio no formato esperado (${responseShape}). Tente novamente.`);
         }
 
-        const analysis = { feedback: result.feedback, generatedAt: new Date().toISOString() };
+        const analysis = { feedback, generatedAt: new Date().toISOString() };
         const cacheKey = this._getAiCacheKey(filters);
         let cacheEntry = {};
         try {
@@ -107,6 +173,72 @@ class ReportService {
             // A resposta continua disponível nesta sessão se o armazenamento falhar.
         }
         return analysis;
+    }
+
+    _extractGeminiOutputText(result) {
+        if (typeof result.output_text === 'string') {
+            return result.output_text;
+        }
+
+        const textParts = [];
+        const visit = value => {
+            if (typeof value === 'string') {
+                textParts.push(value);
+                return;
+            }
+            if (Array.isArray(value)) {
+                value.forEach(visit);
+                return;
+            }
+            if (!value || typeof value !== 'object') {
+                return;
+            }
+            if (typeof value.output_text === 'string') {
+                textParts.push(value.output_text);
+            }
+            if (typeof value.text === 'string') {
+                textParts.push(value.text);
+            }
+            ['output_text', 'output', 'steps', 'content'].forEach(key => {
+                if (value[key] !== undefined && key !== 'output_text' && key !== 'text') {
+                    visit(value[key]);
+                }
+            });
+        };
+        visit(result.output || result.steps || result);
+        return textParts.join('\n');
+    }
+
+    _parseAiFeedback(responseText) {
+        if (this._isValidAiFeedback(responseText)) {
+            return responseText;
+        }
+        if (typeof responseText !== 'string' || !responseText.trim()) {
+            return null;
+        }
+
+        const candidates = [responseText.trim()];
+        const fencedJson = responseText.match(/```(?:json)?\s*([\s\S]*?)```/i);
+        if (fencedJson) {
+            candidates.push(fencedJson[1].trim());
+        }
+        const firstBrace = responseText.indexOf('{');
+        const lastBrace = responseText.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace > firstBrace) {
+            candidates.push(responseText.slice(firstBrace, lastBrace + 1));
+        }
+
+        for (const candidate of candidates) {
+            try {
+                const feedback = JSON.parse(candidate);
+                if (this._isValidAiFeedback(feedback)) {
+                    return feedback;
+                }
+            } catch (error) {
+                // Try the next supported JSON representation.
+            }
+        }
+        return null;
     }
 
     async _generateLocalReport(filters) {

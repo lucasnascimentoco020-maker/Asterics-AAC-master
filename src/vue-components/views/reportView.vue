@@ -27,6 +27,28 @@
         <button v-if="hasFilters" class="clear-button" type="button" @click="clearFilters">Limpar</button>
       </form>
 
+      <form class="ai-settings" @submit.prevent="saveAiSettings">
+        <div class="ai-settings-copy">
+          <p class="panel-kicker">CONFIGURAÇÃO DA IA</p>
+          <h2>Use sua própria chave de API</h2>
+          <p>Escolha o provedor e informe uma chave válida para gerar análises. A chave fica salva sem criptografia neste navegador e é enviada diretamente ao provedor escolhido.</p>
+        </div>
+        <label>
+          <span>Provedor</span>
+          <select v-model="aiSettings.provider">
+            <option value="gemini">Gemini (Google)</option>
+            <option value="openai">ChatGPT (OpenAI)</option>
+          </select>
+        </label>
+        <label class="ai-key-field">
+          <span>Chave de API</span>
+          <input v-model="aiSettings.apiKey" type="password" autocomplete="new-password" spellcheck="false" :placeholder="aiKeyConfigured ? 'Chave salva — deixe em branco para removê-la' : 'Cole sua chave de API'">
+        </label>
+        <button class="filter-button" type="submit"><i class="fas fa-key"></i> Salvar configuração</button>
+        <p class="ai-settings-note">Somente estatísticas agregadas, sem histórico individual ou ID do aluno, são enviadas para análise. O uso pode gerar cobranças conforme as regras do provedor.</p>
+        <p v-if="aiSettingsMessage" class="ai-settings-message" role="status">{{ aiSettingsMessage }}</p>
+      </form>
+
       <div v-if="!filters.userId" class="empty-panel"><i class="fas fa-user-check"></i><h2>Selecione um aluno</h2><p>Os registros do relatório serão carregados após a seleção.</p></div>
 
       <template v-else>
@@ -48,11 +70,13 @@
             <h2>Última análise da IA</h2>
             <p v-if="report.lastAiAnalysis && report.lastAiAnalysis.generatedAt" class="feedback-source">Gerada em {{ formatDate(report.lastAiAnalysis.generatedAt) }}</p>
           </div>
-          <button class="analyze-button" type="button" :disabled="analyzingAi || !report.totalInteractions" @click="runAiAnalysis">
+          <button class="analyze-button" type="button" :disabled="analyzingAi || !report.totalInteractions || !aiKeyConfigured || !aiSettingsSaved" @click="runAiAnalysis">
             <i class="fas fa-brain" :class="{ 'fa-spin': analyzingAi }"></i>
             <span>{{ analyzingAi ? 'Analisando...' : 'Faça uma análise neste usuário' }}</span>
           </button>
         </div>
+        <p v-if="!aiKeyConfigured" class="analysis-error">Configure e salve uma chave de API acima para habilitar a análise.</p>
+        <p v-else-if="!aiSettingsSaved" class="analysis-error">Salve as alterações da configuração da IA antes de analisar.</p>
         <p v-if="aiAnalysisError" class="analysis-error" role="alert">{{ aiAnalysisError }}</p>
         <template v-if="report.lastAiAnalysis">
           <div class="feedback-summary"><i class="fas fa-lightbulb"></i><p>{{ report.lastAiAnalysis.feedback.summary }}</p></div>
@@ -135,11 +159,13 @@ import { localStorageService } from '../../js/service/data/localStorageService';
 
 export default {
   data() {
-    return { report: this.emptyReport(), loading: true, error: '', aiAnalysisError: '', analyzingAi: false, availableUsers: [], filters: { userId: '', from: '', to: '' } };
+    const aiSettings = reportService.getAiSettings();
+    return { report: this.emptyReport(), loading: true, error: '', aiAnalysisError: '', analyzingAi: false, availableUsers: [], filters: { userId: '', from: '', to: '' }, aiSettings, savedAiSettings: Object.assign({}, aiSettings), aiKeyConfigured: Boolean(aiSettings.apiKey), aiSettingsMessage: '' };
   },
   computed: {
     currentUserId() { return reportService.getCurrentUserId(); },
-    hasFilters() { return Boolean(this.filters.userId || this.filters.from || this.filters.to); }
+    hasFilters() { return Boolean(this.filters.userId || this.filters.from || this.filters.to); },
+    aiSettingsSaved() { return this.aiSettings.provider === this.savedAiSettings.provider && this.aiSettings.apiKey === this.savedAiSettings.apiKey; }
   },
   mounted() {
     this.availableUsers = localStorageService.getSavedUsers(reportService.getCurrentUserId());
@@ -160,7 +186,7 @@ export default {
       finally { this.loading = false; }
     },
     async runAiAnalysis() {
-      if (!this.filters.userId || !this.report.totalInteractions || this.analyzingAi) return;
+      if (!this.filters.userId || !this.report.totalInteractions || this.analyzingAi || !this.aiKeyConfigured || !this.aiSettingsSaved) return;
       this.analyzingAi = true;
       this.aiAnalysisError = '';
       try {
@@ -169,6 +195,18 @@ export default {
         this.aiAnalysisError = err && err.message ? err.message : 'Não foi possível gerar a análise.';
       } finally {
         this.analyzingAi = false;
+      }
+    },
+    saveAiSettings() {
+      try {
+        this.aiSettings = reportService.saveAiSettings(this.aiSettings);
+        this.savedAiSettings = Object.assign({}, this.aiSettings);
+        this.aiKeyConfigured = Boolean(this.aiSettings.apiKey);
+        this.aiSettingsMessage = this.aiKeyConfigured
+          ? 'Configuração salva neste navegador.'
+          : 'Chave removida. Informe uma chave para habilitar a análise.';
+      } catch (err) {
+        this.aiSettingsMessage = 'Não foi possível salvar a configuração: ' + (err && err.message ? err.message : err);
       }
     },
     clearFilters() { this.filters = { userId: '', from: '', to: '' }; this.loadReport(); },
@@ -223,6 +261,14 @@ button { border: 0; cursor: pointer; font: inherit; }
 .analyze-button { display: inline-flex; align-items: center; justify-content: center; gap: .55rem; min-height: 2.75rem; max-width: 100%; border-radius: .45rem; padding: .65rem .9rem; color: #fff; background: #177d7a; font-weight: 700; }
 .analyze-button:disabled { opacity: .6; cursor: wait; }
 .analysis-error { margin: 0 0 1rem; color: #a54c4c; }
+.ai-settings { display: grid; grid-template-columns: minmax(220px, 1.2fr) minmax(160px, .7fr) minmax(220px, 1fr) auto; align-items: end; gap: .85rem; max-width: 1180px; margin: 1rem auto; padding: 1rem; border: 1px solid #d7e4e8; border-radius: .55rem; background: rgba(255,255,255,.78); box-shadow: 0 8px 24px rgba(35,70,90,.06); }
+.ai-settings-copy { align-self: center; }
+.ai-settings-copy h2 { margin: 0; color: #174e59; font-size: 1.1rem; }
+.ai-settings-copy p:last-child { margin: .35rem 0 0; color: #678093; font-size: .9rem; line-height: 1.45; }
+.ai-settings label { display: flex; flex-direction: column; gap: .3rem; color: #537083; font-size: .9rem; font-weight: 700; }
+.ai-settings input, .ai-settings select { min-height: 2.65rem; box-sizing: border-box; border: 1px solid #c9d9df; border-radius: .35rem; padding: .55rem .7rem; color: #18324a; background: #fff; }
+.ai-settings-note, .ai-settings-message { grid-column: 1 / -1; margin: 0; color: #718b92; font-size: .85rem; }
+.ai-settings-message { color: #258b85; }
 .filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .85rem; padding: 1rem; border: 1px solid #d7e4e8; border-radius: .55rem; background: rgba(255,255,255,.78); box-shadow: 0 8px 24px rgba(35,70,90,.06); }
 .filters label { display: flex; flex: 1 1 150px; flex-direction: column; gap: .3rem; color: #537083; font-size: .9rem; font-weight: 700; }
 .filters input, .filters select { min-height: 2.65rem; box-sizing: border-box; border: 1px solid #c9d9df; border-radius: .35rem; padding: .55rem .7rem; color: #18324a; background: #fff; }
@@ -288,5 +334,6 @@ button { border: 0; cursor: pointer; font: inherit; }
 .state-error { color: #a54c4c; }
 .state-error button { margin-left: .5rem; color: #177d7a; background: transparent; font-weight: 700; }
 @media (max-width: 900px) { .feedback-columns { grid-template-columns: 1fr; gap: .75rem; } }
-@media (max-width: 720px) { .report-page { padding: 1.25rem .8rem; } .report-header { align-items: flex-start; flex-direction: column; } .refresh-button { align-self: stretch; justify-content: center; } .feedback-heading { flex-direction: column; gap: .8rem; } .analyze-button { align-self: stretch; } .report-meta { align-items: flex-start; flex-direction: column; gap: .35rem; } .summary-grid, .report-grid { grid-template-columns: 1fr; } .history-panel { grid-column: auto; } .history-list { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .ai-settings { grid-template-columns: 1fr 1fr; } .ai-settings-copy, .ai-key-field { grid-column: 1 / -1; } }
+@media (max-width: 720px) { .report-page { padding: 1.25rem .8rem; } .report-header { align-items: flex-start; flex-direction: column; } .refresh-button { align-self: stretch; justify-content: center; } .feedback-heading { flex-direction: column; gap: .8rem; } .analyze-button { align-self: stretch; } .report-meta { align-items: flex-start; flex-direction: column; gap: .35rem; } .summary-grid, .report-grid { grid-template-columns: 1fr; } .ai-settings { grid-template-columns: 1fr; } .ai-settings-copy, .ai-key-field { grid-column: auto; } .history-panel { grid-column: auto; } .history-list { grid-template-columns: 1fr; } }
 </style>
