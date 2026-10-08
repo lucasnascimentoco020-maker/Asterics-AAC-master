@@ -183,6 +183,107 @@ test('parses Gemini interaction output_text responses', () => {
         .toBe(JSON.stringify(feedback));
 });
 
+test('answers free-form Gemini questions using report context and recent conversation', async () => {
+    localStorageService.getJSON.mockImplementation(key => key === 'ASTERICS_PEDAGOGICAL_AI_SETTINGS'
+        ? { provider: 'gemini', apiKey: 'test-gemini-key' }
+        : null);
+    window.fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ output_text: 'Você pode oferecer escolhas entre atividades.' })
+    });
+    const report = {
+        totalInteractions: 14,
+        totalSessions: 3,
+        mostUsedElements: [['quero', 8]],
+        mostUsedCombinations: [],
+        interactionsByActionType: [],
+        interactionsByDay: []
+    };
+
+    const answer = await reportService.askAiQuestion(
+        'Que atividade posso propor?',
+        report,
+        [{ role: 'user', content: 'O que os dados mostram?' }, { role: 'assistant', content: 'Foram 14 interações.' }]
+    );
+
+    const body = JSON.parse(window.fetch.mock.calls[0][1].body);
+    expect(answer).toBe('Você pode oferecer escolhas entre atividades.');
+    expect(body.input).toContain('Que atividade posso propor?');
+    expect(body.input).toContain('Foram 14 interações.');
+    expect(body.input).toContain('"totalInteractions":14');
+    expect(body.store).toBe(false);
+});
+
+test('retries Gemini high-demand responses and succeeds when the provider recovers', async () => {
+    localStorageService.getJSON.mockImplementation(key => key === 'ASTERICS_PEDAGOGICAL_AI_SETTINGS'
+        ? { provider: 'gemini', apiKey: 'test-gemini-key' }
+        : null);
+    window.fetch = jest.fn()
+        .mockResolvedValueOnce({
+            ok: false,
+            status: 503,
+            json: async () => ({ error: { message: 'currently experiencing high demand' } })
+        })
+        .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({ output_text: 'Resposta após a recuperação.' })
+        });
+    const timeoutSpy = jest.spyOn(window, 'setTimeout').mockImplementation(callback => {
+        callback();
+        return 0;
+    });
+
+    try {
+        const answer = await reportService.askAiQuestion('Como posso ajudar?', { totalInteractions: 5 });
+
+        expect(answer).toBe('Resposta após a recuperação.');
+        expect(window.fetch).toHaveBeenCalledTimes(2);
+        expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), 1000);
+    } finally {
+        timeoutSpy.mockRestore();
+    }
+});
+
+test('does not retry permanent provider errors', async () => {
+    localStorageService.getJSON.mockImplementation(key => key === 'ASTERICS_PEDAGOGICAL_AI_SETTINGS'
+        ? { provider: 'gemini', apiKey: 'test-gemini-key' }
+        : null);
+    window.fetch = jest.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: { message: 'Invalid request' } })
+    });
+
+    await expect(reportService.askAiQuestion('Pergunta', { totalInteractions: 1 }))
+        .rejects.toThrow('Invalid request');
+    expect(window.fetch).toHaveBeenCalledTimes(1);
+});
+
+test('answers free-form OpenAI questions using the report and chat transcript', async () => {
+    localStorageService.getJSON.mockImplementation(key => key === 'ASTERICS_PEDAGOGICAL_AI_SETTINGS'
+        ? { provider: 'openai', apiKey: 'test-openai-key' }
+        : null);
+    window.fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'Claro. Vamos explorar isso.' } }] })
+    });
+
+    const answer = await reportService.askAiQuestion(
+        'Explique de forma simples.',
+        { totalInteractions: 5 },
+        [{ role: 'user', content: 'Pode me ajudar?' }, { role: 'assistant', content: 'Sim.' }]
+    );
+
+    const body = JSON.parse(window.fetch.mock.calls[0][1].body);
+    expect(answer).toBe('Claro. Vamos explorar isso.');
+    expect(body.messages).toEqual(expect.arrayContaining([
+        { role: 'user', content: 'Pode me ajudar?' },
+        { role: 'assistant', content: 'Sim.' },
+        { role: 'user', content: 'Explique de forma simples.' }
+    ]));
+    expect(body.messages[0].content).toContain('"totalInteractions":5');
+});
+
 test('returns no previous analysis when the cache is empty', () => {
     localStorageService.getJSON.mockReturnValue(null);
 

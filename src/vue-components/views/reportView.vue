@@ -45,7 +45,7 @@
           <input v-model="aiSettings.apiKey" type="password" autocomplete="new-password" spellcheck="false" :placeholder="aiKeyConfigured ? 'Chave salva — deixe em branco para removê-la' : 'Cole sua chave de API'">
         </label>
         <button class="filter-button" type="submit"><i class="fas fa-key"></i> Salvar configuração</button>
-        <p class="ai-settings-note">Somente estatísticas agregadas, sem histórico individual ou ID do aluno, são enviadas para análise. O uso pode gerar cobranças conforme as regras do provedor.</p>
+        <p class="ai-settings-note">As perguntas e estatísticas agregadas do relatório são enviadas ao provedor escolhido. O contexto não inclui histórico individual nem ID do aluno. O uso pode gerar cobranças conforme as regras do provedor.</p>
         <p v-if="aiSettingsMessage" class="ai-settings-message" role="status">{{ aiSettingsMessage }}</p>
       </form>
 
@@ -87,6 +87,30 @@
           </div>
         </template>
         <p v-else class="feedback-empty">Sem ultima analise</p>
+        <section class="ai-chat">
+          <div class="ai-chat-heading">
+            <h3><i class="fas fa-comments"></i> Pergunte à IA</h3>
+            <p>Faça perguntas sobre o relatório ou outros assuntos.</p>
+          </div>
+          <div v-if="aiChatMessages.length" class="ai-chat-messages" role="log" aria-live="polite" aria-relevant="additions">
+            <article v-for="(message, index) in aiChatMessages" :key="index" class="ai-chat-message" :class="'ai-chat-' + message.role">
+              <strong>{{ message.role === 'user' ? 'Você' : 'IA' }}</strong>
+              <p>{{ message.content }}</p>
+            </article>
+          </div>
+          <p v-else class="ai-chat-empty">Sua conversa aparecerá aqui.</p>
+          <p v-if="aiChatError" class="analysis-error" role="alert">{{ aiChatError }}</p>
+          <form class="ai-chat-form" @submit.prevent="sendAiQuestion">
+            <label class="ai-chat-input">
+              <span class="sr-only">Sua pergunta para a IA</span>
+              <textarea v-model="aiChatQuestion" rows="2" maxlength="4000" placeholder="Escreva sua pergunta..." :disabled="sendingAiQuestion || !aiKeyConfigured || !aiSettingsSaved"></textarea>
+            </label>
+            <button class="analyze-button" type="submit" :disabled="sendingAiQuestion || !aiChatQuestion.trim() || !aiKeyConfigured || !aiSettingsSaved">
+              <i class="fas" :class="sendingAiQuestion ? 'fa-circle-notch fa-spin' : 'fa-paper-plane'"></i>
+              <span>{{ sendingAiQuestion ? 'Respondendo...' : 'Enviar pergunta' }}</span>
+            </button>
+          </form>
+        </section>
         <p class="feedback-note"><i class="fas fa-shield-heart"></i> A análise é mantida para consulta e pode não refletir interações registradas após a data de geração.</p>
       </section>
 
@@ -134,11 +158,6 @@
         </section>
 
         <section class="report-panel">
-          <div class="panel-heading"><div><p class="panel-kicker">DISTRIBUIÇÃO</p><h2>Tipos de ação</h2></div><i class="fas fa-bolt"></i></div>
-          <ul class="metric-list"><li v-for="item in report.interactionsByActionType" :key="item[0]"><span>{{ item[0] }}</span><div class="metric-track"><span :style="{ width: metricWidth(item[1], report.interactionsByActionType) }"></span></div><strong>{{ item[1] }}</strong></li></ul>
-        </section>
-
-        <section class="report-panel">
           <div class="panel-heading"><div><p class="panel-kicker">EVOLUÇÃO</p><h2>Uso por dia</h2></div><i class="fas fa-calendar-day"></i></div>
           <ul class="day-list"><li v-for="item in report.interactionsByDay" :key="item[0]"><span>{{ item[0] }}</span><strong>{{ item[1] }} <small>{{ item[1] === 1 ? 'interação' : 'interações' }}</small></strong></li></ul>
         </section>
@@ -160,12 +179,17 @@ import { localStorageService } from '../../js/service/data/localStorageService';
 export default {
   data() {
     const aiSettings = reportService.getAiSettings();
-    return { report: this.emptyReport(), loading: true, error: '', aiAnalysisError: '', analyzingAi: false, availableUsers: [], filters: { userId: '', from: '', to: '' }, aiSettings, savedAiSettings: Object.assign({}, aiSettings), aiKeyConfigured: Boolean(aiSettings.apiKey), aiSettingsMessage: '' };
+    return { report: this.emptyReport(), loading: true, error: '', aiAnalysisError: '', analyzingAi: false, aiChatQuestion: '', aiChatMessages: [], aiChatError: '', sendingAiQuestion: false, availableUsers: [], filters: { userId: '', from: '', to: '' }, aiSettings, savedAiSettings: Object.assign({}, aiSettings), aiKeyConfigured: Boolean(aiSettings.apiKey), aiSettingsMessage: '' };
   },
   computed: {
     currentUserId() { return reportService.getCurrentUserId(); },
     hasFilters() { return Boolean(this.filters.userId || this.filters.from || this.filters.to); },
     aiSettingsSaved() { return this.aiSettings.provider === this.savedAiSettings.provider && this.aiSettings.apiKey === this.savedAiSettings.apiKey; }
+  },
+  watch: {
+    'filters.userId': 'resetAiChat',
+    'filters.from': 'resetAiChat',
+    'filters.to': 'resetAiChat'
   },
   mounted() {
     this.availableUsers = localStorageService.getSavedUsers(reportService.getCurrentUserId());
@@ -197,6 +221,27 @@ export default {
         this.analyzingAi = false;
       }
     },
+    async sendAiQuestion() {
+      const question = this.aiChatQuestion.trim();
+      if (!question || this.sendingAiQuestion || !this.filters.userId || !this.aiKeyConfigured || !this.aiSettingsSaved) return;
+      this.sendingAiQuestion = true;
+      this.aiChatError = '';
+      const previousMessages = this.aiChatMessages.slice();
+      try {
+        const answer = await reportService.askAiQuestion(question, this.report, previousMessages);
+        this.aiChatMessages.push({ role: 'user', content: question }, { role: 'assistant', content: answer });
+        this.aiChatQuestion = '';
+      } catch (err) {
+        this.aiChatError = err && err.message ? err.message : 'Não foi possível obter uma resposta da IA.';
+      } finally {
+        this.sendingAiQuestion = false;
+      }
+    },
+    resetAiChat() {
+      this.aiChatQuestion = '';
+      this.aiChatMessages = [];
+      this.aiChatError = '';
+    },
     saveAiSettings() {
       try {
         this.aiSettings = reportService.saveAiSettings(this.aiSettings);
@@ -218,10 +263,6 @@ export default {
       if (typeof interaction.label === 'string' && interaction.label.trim()) return interaction.label;
       if (interaction.label && typeof interaction.label === 'object') return Object.values(interaction.label).find(Boolean) || interaction.elementId;
       return interaction.elementId || 'Elemento sem nome';
-    },
-    metricWidth(value, items) {
-      const max = items.length ? Math.max(...items.map(item => item[1])) : 1;
-      return Math.max(8, (value / max) * 100) + '%';
     },
     emptyReport() {
       return {
@@ -297,6 +338,21 @@ button { border: 0; cursor: pointer; font: inherit; }
 .feedback-columns h3 i { color: #3c9a8d; }
 .feedback-columns ul { margin: 0; padding-left: 1.1rem; color: #587583; font-size: .98rem; line-height: 1.55; }
 .feedback-columns li { margin-bottom: .6rem; }
+.ai-chat { margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid #d8ebe7; }
+.ai-chat-heading h3 { margin: 0; color: #31586b; font-size: 1rem; }
+.ai-chat-heading h3 i { margin-right: .35rem; color: #3c9a8d; }
+.ai-chat-heading p, .ai-chat-empty { margin: .3rem 0 .85rem; color: #718b92; font-size: .9rem; }
+.ai-chat-messages { display: flex; max-height: 24rem; flex-direction: column; gap: .65rem; overflow-y: auto; margin-bottom: .85rem; padding: .25rem; }
+.ai-chat-message { max-width: 88%; padding: .7rem .9rem; border-radius: .55rem; color: #31586b; background: #fff; box-shadow: 0 2px 8px rgba(35,70,90,.06); }
+.ai-chat-message strong { display: block; margin-bottom: .2rem; color: #258b85; font-size: .8rem; }
+.ai-chat-message p { margin: 0; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ai-chat-user { align-self: flex-end; background: #e6f4f1; }
+.ai-chat-assistant { align-self: flex-start; }
+.ai-chat-form { display: flex; align-items: flex-end; gap: .65rem; }
+.ai-chat-input { flex: 1; }
+.ai-chat-input textarea { display: block; width: 100%; min-height: 2.75rem; box-sizing: border-box; resize: vertical; border: 1px solid #c9d9df; border-radius: .35rem; padding: .65rem .75rem; color: #18324a; background: #fff; font: inherit; }
+.ai-chat-input textarea:focus { outline: 2px solid rgba(37,139,133,.25); border-color: #258b85; }
+.ai-chat-form .analyze-button { flex: 0 0 auto; }
 .feedback-note { margin: 1.25rem 0 0; padding-top: .9rem; border-top: 1px solid #d8ebe7; color: #718b92; font-size: .88rem; }
 .feedback-note i { margin-right: .35rem; color: #3c9a8d; }
 .report-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
@@ -305,19 +361,17 @@ button { border: 0; cursor: pointer; font: inherit; }
 .panel-heading { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 1rem; }
 .panel-heading h2 { margin: 0; color: #1b4059; font-size: 1.05rem; }
 .panel-heading > i { color: #68a9a0; font-size: 1.2rem; }
-.ranking-list, .metric-list, .day-list, .history-list { margin: 0; padding: 0; list-style: none; }
+.ranking-list, .day-list, .history-list { margin: 0; padding: 0; list-style: none; }
 .combination-list { margin: 0; padding: 0; list-style: none; }
 .combination-list li { display: flex; align-items: center; gap: .7rem; min-height: 2.5rem; border-bottom: 1px solid #edf2f2; }
 .combination-list li:last-child { border-bottom: 0; }
 .combination-list li > span:nth-child(2) { flex: 1; overflow-wrap: anywhere; color: #47697a; }
 .combination-list strong { color: #1b4059; }
-.ranking-list li, .metric-list li, .day-list li { display: flex; align-items: center; gap: .7rem; min-height: 2.5rem; border-bottom: 1px solid #edf2f2; }
-.ranking-list li:last-child, .metric-list li:last-child, .day-list li:last-child { border-bottom: 0; }
+.ranking-list li, .day-list li { display: flex; align-items: center; gap: .7rem; min-height: 2.5rem; border-bottom: 1px solid #edf2f2; }
+.ranking-list li:last-child, .day-list li:last-child { border-bottom: 0; }
 .rank { display: grid; width: 1.5rem; height: 1.5rem; place-items: center; border-radius: 50%; color: #177d7a; background: #e2f1ef; font-size: .75rem; font-weight: 800; }
-.item-name, .metric-list li > span, .day-list li > span { flex: 1; overflow: hidden; color: #47697a; text-overflow: ellipsis; white-space: nowrap; }
-.ranking-list strong, .metric-list strong, .day-list strong { color: #1b4059; }
-.metric-track { flex: 1; height: .42rem; overflow: hidden; border-radius: 1rem; background: #eaf1f1; }
-.metric-track span { display: block; height: 100%; border-radius: inherit; background: #4fa89d; }
+.item-name, .day-list li > span { flex: 1; overflow: hidden; color: #47697a; text-overflow: ellipsis; white-space: nowrap; }
+.ranking-list strong, .day-list strong { color: #1b4059; }
 .day-list small { color: #8aa0a8; font-weight: 400; }
 .history-list { display: grid; grid-template-columns: repeat(2, 1fr); column-gap: 2rem; }
 .history-list li { display: flex; align-items: flex-start; gap: .7rem; padding: .7rem 0; border-bottom: 1px solid #edf2f2; }
@@ -335,5 +389,5 @@ button { border: 0; cursor: pointer; font: inherit; }
 .state-error button { margin-left: .5rem; color: #177d7a; background: transparent; font-weight: 700; }
 @media (max-width: 900px) { .feedback-columns { grid-template-columns: 1fr; gap: .75rem; } }
 @media (max-width: 900px) { .ai-settings { grid-template-columns: 1fr 1fr; } .ai-settings-copy, .ai-key-field { grid-column: 1 / -1; } }
-@media (max-width: 720px) { .report-page { padding: 1.25rem .8rem; } .report-header { align-items: flex-start; flex-direction: column; } .refresh-button { align-self: stretch; justify-content: center; } .feedback-heading { flex-direction: column; gap: .8rem; } .analyze-button { align-self: stretch; } .report-meta { align-items: flex-start; flex-direction: column; gap: .35rem; } .summary-grid, .report-grid { grid-template-columns: 1fr; } .ai-settings { grid-template-columns: 1fr; } .ai-settings-copy, .ai-key-field { grid-column: auto; } .history-panel { grid-column: auto; } .history-list { grid-template-columns: 1fr; } }
+@media (max-width: 720px) { .report-page { padding: 1.25rem .8rem; } .report-header { align-items: flex-start; flex-direction: column; } .refresh-button { align-self: stretch; justify-content: center; } .feedback-heading { flex-direction: column; gap: .8rem; } .analyze-button { align-self: stretch; } .ai-chat-form { align-items: stretch; flex-direction: column; } .report-meta { align-items: flex-start; flex-direction: column; gap: .35rem; } .summary-grid, .report-grid { grid-template-columns: 1fr; } .ai-settings { grid-template-columns: 1fr; } .ai-settings-copy, .ai-key-field { grid-column: auto; } .history-panel { grid-column: auto; } .history-list { grid-template-columns: 1fr; } }
 </style>
