@@ -16,6 +16,7 @@ import { reportService } from './reportService';
 import { interactionService } from './interactionService';
 import { localStorageService } from './localStorageService';
 
+// Confere a montagem de combinações sem misturar alunos ou sessões diferentes.
 test('counts consecutive item combinations within each session', () => {
     const interactions = [
         { userId: 'student-a', sessionId: 'session-1', timestamp: 1000, label: 'quero' },
@@ -48,6 +49,7 @@ test('does not load report records until an user is selected', async () => {
     expect(interactionService.getInteractions).not.toHaveBeenCalled();
 });
 
+// Verifica chamadas explícitas à IA, cache de análises e comunicação com cada provedor.
 test('generates an AI analysis only when explicitly requested', async () => {
     const cache = {};
     localStorageService.get.mockReturnValue('true');
@@ -183,6 +185,7 @@ test('parses Gemini interaction output_text responses', () => {
         .toBe(JSON.stringify(feedback));
 });
 
+// Garante que o chat preserve o contexto útil e trate limites e falhas do provedor.
 test('answers free-form Gemini questions using report context and recent conversation', async () => {
     localStorageService.getJSON.mockImplementation(key => key === 'ASTERICS_PEDAGOGICAL_AI_SETTINGS'
         ? { provider: 'gemini', apiKey: 'test-gemini-key' }
@@ -259,6 +262,25 @@ test('does not retry permanent provider errors', async () => {
     expect(window.fetch).toHaveBeenCalledTimes(1);
 });
 
+test('reports Gemini daily free-tier quotas without wasting retry attempts', async () => {
+    localStorageService.getJSON.mockImplementation(key => key === 'ASTERICS_PEDAGOGICAL_AI_SETTINGS'
+        ? { provider: 'gemini', apiKey: 'test-gemini-key' }
+        : null);
+    window.fetch = jest.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        json: async () => ({
+            error: {
+                message: 'Rate limit exceeded for model gemini-3.8-flash (limit: 20 requests per day on Free Tier). Please retry in 4h23m53s or upgrade your tier.'
+            }
+        })
+    });
+
+    await expect(reportService.askAiQuestion('Outra pergunta', { totalInteractions: 1 }))
+        .rejects.toThrow('A cota diária da IA foi atingida: 20 solicitações por dia (Free Tier). Tente novamente em 4h23m53s.');
+    expect(window.fetch).toHaveBeenCalledTimes(1);
+});
+
 test('answers free-form OpenAI questions using the report and chat transcript', async () => {
     localStorageService.getJSON.mockImplementation(key => key === 'ASTERICS_PEDAGOGICAL_AI_SETTINGS'
         ? { provider: 'openai', apiKey: 'test-openai-key' }
@@ -290,6 +312,7 @@ test('returns no previous analysis when the cache is empty', () => {
     expect(reportService._getCachedAiAnalysis({ userId: 'student-d' })).toBeNull();
 });
 
+// Confirma que as preferências do provedor e a chave são persistidas normalizadas.
 test('saves the selected AI provider and normalized API key', () => {
     const storedSettings = {};
     localStorageService.saveJSON.mockImplementation((key, value) => { storedSettings[key] = value; });

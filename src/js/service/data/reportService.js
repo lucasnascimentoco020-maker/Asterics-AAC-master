@@ -2,6 +2,7 @@ import { interactionService } from './interactionService';
 import { localStorageService } from './localStorageService';
 
 class ReportService {
+    // Lê as credenciais e o provedor escolhidos pela pessoa usuária neste navegador.
     getAiSettings() {
         try {
             const settings = localStorageService.getJSON('ASTERICS_PEDAGOGICAL_AI_SETTINGS') || {};
@@ -14,6 +15,7 @@ class ReportService {
         }
     }
 
+    // Grava as credenciais e confirma que o navegador persistiu os valores selecionados.
     saveAiSettings(settings) {
         const provider = settings.provider === 'gemini' ? 'gemini' : 'openai';
         const apiKey = typeof settings.apiKey === 'string' ? settings.apiKey.trim() : '';
@@ -31,6 +33,7 @@ class ReportService {
         return `ASTERICS_PEDAGOGICAL_AI_WEEKLY_CACHE_${encodeURIComponent(scope)}`;
     }
 
+    // Recupera a análise anterior do aluno, aceitando também o formato legado do cache.
     _getCachedAiAnalysis(filters = {}) {
         try {
             const cacheEntry = localStorageService.getJSON(this._getAiCacheKey(filters));
@@ -66,11 +69,11 @@ class ReportService {
             };
         }
         const localReport = await this._generateLocalReport(filters);
-        // Se habilitada, a API PostgreSQL fornece o relatório centralizado.
+        // Combina os dados locais com o relatório centralizado, se a API remota estiver habilitada.
         const remoteReport = await this._getRemoteReport(filters);
         let report = localReport;
         if (remoteReport) {
-            // Uma resposta remota vazia não deve esconder eventos já salvos localmente.
+            // Evita que uma resposta remota vazia esconda interações já registradas localmente.
             if (remoteReport.totalInteractions > 0 || localReport.totalInteractions === 0) {
                 report = Object.assign(remoteReport, {
                     pedagogicalFeedback: this._buildPedagogicalFeedback(remoteReport),
@@ -95,6 +98,7 @@ class ReportService {
             throw new Error('Informe e salve uma chave de API na configuração da IA.');
         }
 
+        // Envia estatísticas agregadas ao provedor e exige uma resposta estruturada para o relatório.
         const analysisData = this._buildAiAnalysisData(report);
         const prompt = 'Você é um assistente de apoio pedagógico para comunicação aumentativa e alternativa. Analise somente as estatísticas agregadas fornecidas. Os dados contêm rótulos e identificadores, não os arquivos visuais das imagens; não afirme ter visto imagens. Separe fatos observados de hipóteses, não infira diagnóstico, intenção, capacidade ou estado emocional, e proponha ações práticas que a professora possa adaptar. Gere a resposta em JSON com as propriedades summary (string), observations (array de strings), interpretations (array de strings) e recommendations (array de strings).';
         const isGemini = provider === 'gemini';
@@ -165,11 +169,12 @@ class ReportService {
         try {
             localStorageService.saveJSON(cacheKey, cacheEntry);
         } catch (error) {
-            // A resposta continua disponível nesta sessão se o armazenamento falhar.
+            // Mantém a resposta na tela mesmo quando o navegador não permite gravar o cache.
         }
         return analysis;
     }
 
+    // Envia uma pergunta livre com o contexto do relatório e as mensagens recentes da conversa.
     async askAiQuestion(question, report, conversation = []) {
         const trimmedQuestion = typeof question === 'string' ? question.trim() : '';
         if (!trimmedQuestion) {
@@ -198,6 +203,7 @@ class ReportService {
         let requestBody;
 
         if (isGemini) {
+            // O Gemini recebe o histórico como texto; não ativa o armazenamento de conversas no provedor.
             const transcript = conversationHistory
                 .map(message => `${message.role === 'user' ? 'Professora' : 'IA'}: ${message.content}`)
                 .join('\n\n');
@@ -215,6 +221,7 @@ class ReportService {
                 generation_config: { thinking_level: 'low' }
             };
         } else {
+            // O ChatGPT recebe as mensagens separadas por papel para preservar o formato de conversa.
             requestBody = {
                 model: 'gpt-4o-mini',
                 temperature: 0.4,
@@ -244,6 +251,7 @@ class ReportService {
         return answer.trim();
     }
 
+    // Repete erros temporários, mas interrompe de imediato cotas diárias e erros permanentes.
     async _requestAiProvider(url, options, provider) {
         const maxAttempts = 3;
         const retryableStatuses = [408, 429, 500, 502, 503, 504];
@@ -256,6 +264,15 @@ class ReportService {
 
             const result = await response.json().catch(() => ({}));
             const details = result.error && result.error.message;
+            const dailyQuota = details && details.match(/limit:\s*([\d,]+)\s*requests per day(?: on ([^).]+))?/i);
+            if (response.status === 429 && dailyQuota) {
+                const retryDelay = details.match(/retry in\s+([\dhms]+)/i);
+                const tier = dailyQuota[2] ? ` (${dailyQuota[2].trim()})` : '';
+                const waitText = retryDelay
+                    ? ` Tente novamente em ${retryDelay[1].trim()}.`
+                    : ' Tente novamente após a renovação da cota.';
+                throw new Error(`A cota diária da IA foi atingida: ${dailyQuota[1]} solicitações por dia${tier}.${waitText} Aguarde a renovação ou consulte o provedor para ver opções de cota.`);
+            }
             if (!retryableStatuses.includes(response.status) || attempt === maxAttempts) {
                 if (retryableStatuses.includes(response.status)) {
                     const providerName = provider === 'gemini' ? 'Gemini' : 'provedor de IA';
@@ -271,6 +288,7 @@ class ReportService {
         throw new Error('Não foi possível completar a solicitação à IA.');
     }
 
+    // Reúne o texto final da resposta Gemini, que pode aparecer em diferentes níveis da interação.
     _extractGeminiOutputText(result) {
         if (typeof result.output_text === 'string') {
             return result.output_text;
@@ -305,6 +323,7 @@ class ReportService {
         return textParts.join('\n');
     }
 
+    // Aceita JSON puro, JSON cercado por Markdown ou JSON acompanhado de texto introdutório.
     _parseAiFeedback(responseText) {
         if (this._isValidAiFeedback(responseText)) {
             return responseText;
@@ -334,21 +353,21 @@ class ReportService {
                     return feedback;
                 }
             } catch (error) {
-                // Try the next supported JSON representation.
+                // Tenta a próxima representação de JSON reconhecida.
             }
         }
         return null;
     }
 
     async _generateLocalReport(filters) {
-        // Caso contrário, consulta os eventos armazenados localmente no PouchDB.
+        // Carrega as interações locais e mantém apenas as que atendem aos filtros selecionados.
         let interactions = await interactionService.getInteractions();
         log.info('[usage] relatório antes dos filtros', {
             count: interactions.length,
             userIds: [...new Set(interactions.map(interaction => interaction.userId).filter(Boolean))],
             database: interactionService.getCurrentUserId()
         });
-        // Aplica os filtros pedagógicos antes de calcular os indicadores.
+        // Descarta datas inválidas e aplica o aluno e o intervalo de datas escolhidos.
         interactions = interactions.filter(interaction => {
             const timestamp = new Date(interaction.timestamp).getTime();
             if (!Number.isFinite(timestamp)) {
@@ -364,17 +383,15 @@ class ReportService {
             count: interactions.length,
             userIds: [...new Set(interactions.map(interaction => interaction.userId).filter(Boolean))]
         });
-        // Total de ativações no período e usuário selecionados.
+        // Calcula as contagens usadas pelos cartões, listas e gráficos do relatório.
         const total = interactions.length;
 
-        // Frequência por elemento (qual célula foi mais usada)
+        // Acumula a frequência dos elementos, tipos de ação e dias de uso.
         const byElement = {};
-        // Frequência por tipo de ação
         const byActionType = {};
-        // Uso por dia (para ver evolução ao longo do tempo)
         const byDay = {};
 
-        // Percorre os eventos uma única vez para gerar as três agregações.
+        // Percorre cada interação uma vez e atualiza os três agrupamentos.
         interactions.forEach(inter => {
             const elementKey = this._getItemLabel(inter);
             byElement[elementKey] = (byElement[elementKey] || 0) + 1;
@@ -390,7 +407,7 @@ class ReportService {
         return {
             generatedAt: new Date().toISOString(),
             totalInteractions: total,
-            // Set elimina IDs repetidos e conta cada sessão apenas uma vez.
+            // Conta sessões distintas sem duplicar IDs repetidos.
             totalSessions: new Set(interactions.map(inter => inter.sessionId).filter(Boolean)).size,
             mostUsedElements: this._sortDesc(byElement),
             mostUsedItems: this._sortDesc(byElement),
@@ -413,6 +430,7 @@ class ReportService {
         };
     }
 
+    // Conta pares consecutivos por sessão sem misturar interações de alunos ou sessões diferentes.
     _getMostUsedCombinations(interactions) {
         const previousBySession = {};
         const combinations = {};
@@ -435,7 +453,7 @@ class ReportService {
     }
 
     _buildAiAnalysisData(report) {
-        // Envia apenas estatísticas agregadas, sem IDs de aluno ou histórico individual.
+        // Compartilha somente métricas agregadas, sem ID de aluno nem histórico individual.
         return {
             totalInteractions: report.totalInteractions || 0,
             totalSessions: report.totalSessions || 0,
@@ -447,6 +465,7 @@ class ReportService {
         };
     }
 
+    // Confirma a presença e os tipos de todos os campos necessários para exibir a análise.
     _isValidAiFeedback(feedback) {
         return Boolean(feedback && typeof feedback.summary === 'string' &&
             Array.isArray(feedback.observations) &&
@@ -454,6 +473,7 @@ class ReportService {
             Array.isArray(feedback.recommendations));
     }
 
+    // Produz uma síntese local cautelosa, sem depender de uma chamada externa à IA.
     _buildPedagogicalFeedback(report, interactions = []) {
         const total = report.totalInteractions || 0;
         const uniqueItems = (report.mostUsedElements || []).length;
@@ -556,8 +576,9 @@ class ReportService {
         return localStorageService.getAutologinOrActiveUser() || 'offline';
     }
 
+    // Controla a consulta remota por opção explícita na URL ou nas configurações locais.
     async _getRemoteReport(filters) {
-        // O relatório remoto só é consultado quando explicitamente habilitado.
+        // Consulta o relatório remoto apenas quando a integração está habilitada.
         if (!this._isUsageApiEnabled() || typeof window === 'undefined' || !window.fetch) {
             return null;
         }
@@ -566,7 +587,7 @@ class ReportService {
         if (filters.from) params.set('from', filters.from);
         if (filters.to) params.set('to', new Date(new Date(filters.to).getTime() + 86400000).toISOString());
         try {
-            // Os filtros são enviados na query string da API.
+            // Envia os filtros na URL para que a API retorne apenas o recorte solicitado.
             const response = await window.fetch('/api/usage/reports?' + params.toString());
             if (!response.ok) return null;
             const report = await response.json();
@@ -597,7 +618,7 @@ class ReportService {
     }
 
     _getItemLabel(interaction) {
-        // Usa o texto do evento; se não houver, mantém o ID técnico do elemento.
+        // Prefere o rótulo legível do elemento e usa o ID técnico apenas como alternativa.
         if (typeof interaction.label === 'string') {
             return interaction.label;
         }
@@ -607,16 +628,12 @@ class ReportService {
         return interaction.elementId;
     }
 
-    /**
-     * Ordena um objeto de contagens do maior para o menor.
-     */
+    // Ordena as contagens da maior para a menor.
     _sortDesc(obj) {
         return Object.entries(obj).sort((a, b) => b[1] - a[1]);
     }
 
-    /**
-     * Ordena um objeto de contagens por chave (ex.: data).
-     */
+    // Ordena as contagens pela chave, como nas datas do relatório.
     _sortAsc(obj) {
         return Object.entries(obj).sort((a, b) => (a[0] < b[0] ? -1 : 1));
     }

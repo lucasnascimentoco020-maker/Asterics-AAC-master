@@ -19,6 +19,7 @@
     </div>
 
     <div v-else>
+      <!-- Os filtros determinam o aluno e o intervalo usados no relatório e na conversa com a IA. -->
       <form class="filters" @submit.prevent="loadReport">
         <label><span>Aluno</span><select v-model="filters.userId" @change="loadReport"><option value="">Selecione um aluno</option><option v-for="user in availableUsers" :key="user" :value="user">{{ user }}</option></select></label>
         <label><span>De</span><input v-model="filters.from" type="date"></label>
@@ -27,6 +28,7 @@
         <button v-if="hasFilters" class="clear-button" type="button" @click="clearFilters">Limpar</button>
       </form>
 
+      <!-- As credenciais são configuradas localmente e enviadas apenas ao provedor selecionado. -->
       <form class="ai-settings" @submit.prevent="saveAiSettings">
         <div class="ai-settings-copy">
           <p class="panel-kicker">CONFIGURAÇÃO DA IA</p>
@@ -63,6 +65,7 @@
         <article class="summary-card"><span class="summary-icon"><i class="fas fa-th-large"></i></span><div><span class="summary-label">Elementos utilizados</span><strong>{{ report.mostUsedElements.length }}</strong></div></article>
       </div>
 
+      <!-- Reúne a análise automática e o chat, ambos vinculados ao relatório selecionado. -->
       <section class="feedback-panel ai-analysis-panel">
         <div class="feedback-heading">
           <div>
@@ -114,6 +117,7 @@
         <p class="feedback-note"><i class="fas fa-shield-heart"></i> A análise é mantida para consulta e pode não refletir interações registradas após a data de geração.</p>
       </section>
 
+      <!-- Mostra a síntese pedagógica local, calculada a partir dos indicadores de uso. -->
       <section v-if="report.pedagogicalFeedback" class="feedback-panel">
         <div class="feedback-heading">
           <div>
@@ -146,6 +150,7 @@
 
       <div v-if="!report.totalInteractions" class="empty-panel"><i class="fas fa-chart-bar"></i><h2>Nenhuma interação neste filtro</h2><p>Use o aplicativo ou ajuste os filtros para visualizar os dados registrados.</p></div>
 
+      <!-- Apresenta rankings, sequências, evolução diária e histórico das interações. -->
       <div v-else class="report-grid">
         <section class="report-panel">
           <div class="panel-heading"><div><p class="panel-kicker">DESTAQUES</p><h2>Elementos mais usados</h2></div><i class="fas fa-ranking-star"></i></div>
@@ -178,24 +183,29 @@ import { localStorageService } from '../../js/service/data/localStorageService';
 
 export default {
   data() {
+    // Inicializa o relatório, o estado da conversa e as credenciais já salvas no navegador.
     const aiSettings = reportService.getAiSettings();
     return { report: this.emptyReport(), loading: true, error: '', aiAnalysisError: '', analyzingAi: false, aiChatQuestion: '', aiChatMessages: [], aiChatError: '', sendingAiQuestion: false, availableUsers: [], filters: { userId: '', from: '', to: '' }, aiSettings, savedAiSettings: Object.assign({}, aiSettings), aiKeyConfigured: Boolean(aiSettings.apiKey), aiSettingsMessage: '' };
   },
   computed: {
+    // Expõe valores derivados usados para habilitar ações e mostrar o usuário do banco atual.
     currentUserId() { return reportService.getCurrentUserId(); },
     hasFilters() { return Boolean(this.filters.userId || this.filters.from || this.filters.to); },
     aiSettingsSaved() { return this.aiSettings.provider === this.savedAiSettings.provider && this.aiSettings.apiKey === this.savedAiSettings.apiKey; }
   },
+  // Limpa o histórico da conversa sempre que muda o aluno ou o período do relatório.
   watch: {
     'filters.userId': 'resetAiChat',
     'filters.from': 'resetAiChat',
     'filters.to': 'resetAiChat'
   },
   mounted() {
+    // Carrega os alunos disponíveis e o estado inicial do relatório ao abrir a página.
     this.availableUsers = localStorageService.getSavedUsers(reportService.getCurrentUserId());
     this.loadReport();
   },
   methods: {
+    // Carrega os indicadores para os filtros atuais e apresenta falhas na própria página.
     async loadReport() {
       this.loading = true;
       this.error = '';
@@ -209,6 +219,7 @@ export default {
       catch (err) { this.report = this.emptyReport(); this.error = 'Não foi possível carregar o relatório: ' + (err && err.message ? err.message : err); }
       finally { this.loading = false; }
     },
+    // Solicita uma análise estruturada sob demanda e atualiza o resultado visível.
     async runAiAnalysis() {
       if (!this.filters.userId || !this.report.totalInteractions || this.analyzingAi || !this.aiKeyConfigured || !this.aiSettingsSaved) return;
       this.analyzingAi = true;
@@ -221,6 +232,7 @@ export default {
         this.analyzingAi = false;
       }
     },
+    // Envia a pergunta junto com o contexto da conversa e acrescenta a resposta ao chat.
     async sendAiQuestion() {
       const question = this.aiChatQuestion.trim();
       if (!question || this.sendingAiQuestion || !this.filters.userId || !this.aiKeyConfigured || !this.aiSettingsSaved) return;
@@ -237,11 +249,13 @@ export default {
         this.sendingAiQuestion = false;
       }
     },
+    // Impede que mensagens de um aluno ou período apareçam no contexto de outro relatório.
     resetAiChat() {
       this.aiChatQuestion = '';
       this.aiChatMessages = [];
       this.aiChatError = '';
     },
+    // Persiste as credenciais e só habilita as chamadas quando não há alterações pendentes.
     saveAiSettings() {
       try {
         this.aiSettings = reportService.saveAiSettings(this.aiSettings);
@@ -254,11 +268,14 @@ export default {
         this.aiSettingsMessage = 'Não foi possível salvar a configuração: ' + (err && err.message ? err.message : err);
       }
     },
+    // Remove todos os filtros e retorna a tela ao estado sem aluno selecionado.
     clearFilters() { this.filters = { userId: '', from: '', to: '' }; this.loadReport(); },
+    // Formata datas e rótulos para apresentação nos cartões e no histórico.
     formatDate(timestamp) {
       const date = new Date(timestamp);
       return Number.isNaN(date.getTime()) ? 'Data desconhecida' : date.toLocaleString('pt-BR');
     },
+    // Usa o rótulo legível da interação quando disponível, com o ID como alternativa.
     itemLabel(interaction) {
       if (typeof interaction.label === 'string' && interaction.label.trim()) return interaction.label;
       if (interaction.label && typeof interaction.label === 'object') return Object.values(interaction.label).find(Boolean) || interaction.elementId;
@@ -290,6 +307,7 @@ export default {
 </script>
 
 <style scoped>
+/* Estrutura geral e controles compartilhados da página de relatório. */
 .report-page { min-height: 100%; padding: 2.5rem clamp(1rem, 4vw, 4rem); color: #18324a; background: linear-gradient(135deg, #f5f9fc 0%, #eef4f2 100%); font-size: 1.05rem; }
 .report-header, .filters, .report-meta, .summary-grid, .report-grid { max-width: 1180px; margin-left: auto; margin-right: auto; }
 .report-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 1.5rem; margin-bottom: 2rem; }
@@ -355,6 +373,8 @@ button { border: 0; cursor: pointer; font: inherit; }
 .ai-chat-form .analyze-button { flex: 0 0 auto; }
 .feedback-note { margin: 1.25rem 0 0; padding-top: .9rem; border-top: 1px solid #d8ebe7; color: #718b92; font-size: .88rem; }
 .feedback-note i { margin-right: .35rem; color: #3c9a8d; }
+/* Balões, histórico e campo de envio da conversa com a IA. */
+/* Cartões com rankings, sequências, evolução e histórico do relatório. */
 .report-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
 .report-panel { min-width: 0; padding: 1.35rem; border: 1px solid #d8e5e6; border-radius: .55rem; background: #fff; box-shadow: 0 8px 25px rgba(35,70,90,.06); }
 .history-panel { grid-column: span 2; }
